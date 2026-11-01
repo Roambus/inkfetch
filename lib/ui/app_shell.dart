@@ -70,22 +70,29 @@ class _AppShellState extends State<AppShell> {
     ];
     final body = IndexedStack(index: c.tabIndex, children: pages);
 
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: AppBackground(
-        child: SafeArea(
-          bottom: !wide,
-          child: wide
-              ? Row(
-                  children: [
-                    _buildRail(context),
-                    Expanded(child: body),
-                  ],
-                )
-              : body,
-        ),
+    // 固定字号的小布局在超大字体缩放下会重叠，这里限制上限。
+    final media = MediaQuery.of(context);
+    return MediaQuery(
+      data: media.copyWith(
+        textScaler: media.textScaler.clamp(maxScaleFactor: 1.4),
       ),
-      bottomNavigationBar: wide ? null : _buildBottomBar(context),
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        body: AppBackground(
+          child: SafeArea(
+            bottom: !wide,
+            child: wide
+                ? Row(
+                    children: [
+                      _buildRail(context),
+                      Expanded(child: body),
+                    ],
+                  )
+                : body,
+          ),
+        ),
+        bottomNavigationBar: wide ? null : _buildBottomBar(context),
+      ),
     );
   }
 

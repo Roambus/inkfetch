@@ -23,18 +23,6 @@ class ProbeOptions {
   });
 }
 
-class ProbeOutcome {
-  final ProbeReport report;
-  final int waveOneCount;
-  final int waveTwoCount;
-
-  const ProbeOutcome({
-    required this.report,
-    required this.waveOneCount,
-    required this.waveTwoCount,
-  });
-}
-
 SourceProbe _failedProbe(
   SourceCandidate candidate,
   String message, [
@@ -55,22 +43,6 @@ SourceProbe _failedProbe(
     error: message,
     experimental: candidate.experimental,
   );
-}
-
-(int, int, int?)? parseContentRange(String value) {
-  if (!value.startsWith('bytes ')) return null;
-  final rest = value.substring(6);
-  final slash = rest.indexOf('/');
-  if (slash < 0) return null;
-  final rangePart = rest.substring(0, slash);
-  final totalPart = rest.substring(slash + 1);
-  final dash = rangePart.indexOf('-');
-  if (dash < 0) return null;
-  final start = int.tryParse(rangePart.substring(0, dash).trim());
-  final end = int.tryParse(rangePart.substring(dash + 1).trim());
-  if (start == null || end == null) return null;
-  final total = totalPart.trim() == '*' ? null : int.tryParse(totalPart.trim());
-  return (start, end, total);
 }
 
 bool _looksLikeHtml(List<int> bytes) {
@@ -139,7 +111,7 @@ Future<SourceProbe> _probeOne(
     final rangeEnd = options.probeBytes - 1;
     request.headers.set(HttpHeaders.rangeHeader, 'bytes=0-$rangeEnd');
     request.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
-    request.headers.set(HttpHeaders.userAgentHeader, 'OctoFetch/1.0');
+    request.headers.set(HttpHeaders.userAgentHeader, 'InkFetch/1.0');
     final response = await request.close();
     final ttfb = stopwatch.elapsed;
     final status = response.statusCode;
@@ -342,7 +314,7 @@ Future<String?> _releaseDigest(ParsedUrl parsed) async {
       HttpHeaders.acceptHeader,
       'application/vnd.github+json',
     );
-    request.headers.set(HttpHeaders.userAgentHeader, 'OctoFetch');
+    request.headers.set(HttpHeaders.userAgentHeader, 'InkFetch');
     final response = await request.close().timeout(const Duration(seconds: 3));
     if (response.statusCode != HttpStatus.ok) {
       await response.drain<void>();
@@ -372,7 +344,9 @@ Future<String?> _releaseDigest(ParsedUrl parsed) async {
   }
 }
 
-Future<ProbeOutcome> probeSources(
+/// 分层探测：先测常用镜像，可用分片源不足时才扩展到长尾与实验源，
+/// 避免每次都为 100 多个镜像各花掉一份采样流量。
+Future<ProbeReport> probeSources(
   ParsedUrl parsed,
   ProbeOptions options, {
   List<String> disabledMirrors = const [],
@@ -387,23 +361,56 @@ Future<ProbeOutcome> probeSources(
     ..connectionTimeout = options.timeout
     ..autoUncompress = false
     ..idleTimeout = const Duration(seconds: 15)
-    ..userAgent = 'OctoFetch/1.0'
+    ..userAgent = 'InkFetch/2.0.0'
     ..findProxy = ((uri) => HttpClient.findProxyFromEnvironment(uri));
 
-  var waveOneCount = 0;
-  var waveTwoCount = 0;
-  var sources = <SourceProbe>[];
+  const curatedLimit = 16;
+  const maxProbed = 48;
+  const enoughRangeSources = 4;
+
+  final sources = <SourceProbe>[];
   try {
-    onProgress?.call('正在测试全部 ${candidates.length} 个镜像…');
     final digestFuture = _releaseDigest(parsed);
-    sources = await _probeBatch(
-      candidates,
-      parsed,
-      client,
-      options,
-      onTick: (done, total) => onProgress?.call('正在测试镜像 $done/$total…'),
-    );
-    waveOneCount = candidates.length;
+
+    final curated = candidates
+        .where((c) => !c.experimental && c.priority <= 40)
+        .take(curatedLimit)
+        .toList();
+    final curatedIds = curated.map((c) => c.id).toSet();
+    final standard = candidates
+        .where((c) => !curatedIds.contains(c.id) && !c.experimental)
+        .toList();
+    final experimental = candidates
+        .where((c) => !curatedIds.contains(c.id) && c.experimental)
+        .toList();
+    final tiers = [curated, standard, experimental];
+
+    var probed = 0;
+    for (var tier = 0; tier < tiers.length; tier++) {
+      final remaining = maxProbed - probed;
+      if (remaining <= 0) break;
+      final batch = tiers[tier].take(remaining).toList();
+      if (batch.isEmpty) continue;
+      probed += batch.length;
+      onProgress?.call(
+        '正在测试镜像（第 ${tier + 1} 层，共 ${batch.length} 个）…',
+      );
+      sources.addAll(
+        await _probeBatch(
+          batch,
+          parsed,
+          client,
+          options,
+          onTick: (done, total) =>
+              onProgress?.call('正在测试镜像（第 ${tier + 1} 层）$done/$total…'),
+        ),
+      );
+      final healthy = sources
+          .where((s) => s.status == ProbeStatus.healthy && s.supportsRange)
+          .length;
+      if (healthy >= enoughRangeSources) break;
+    }
+
     onProgress?.call('正在校验各镜像文件一致性…');
     final expectedSha = await digestFuture;
 
@@ -458,21 +465,17 @@ Future<ProbeOutcome> probeSources(
         .length;
     final plan = planThreads(sources, totalSize, options.maxTotalConnections);
 
-    return ProbeOutcome(
-      report: ProbeReport(
-        parsed: parsed,
-        sources: sources,
-        testedCount: waveOneCount + waveTwoCount,
-        usableCount: usableCount,
-        rangeCount: rangeCount,
-        totalSize: totalSize,
-        baselineHash: baseline?.firstHash,
-        plan: plan,
-        expectedSha256: expectedSha,
-        probedMs: started.elapsed.inMilliseconds,
-      ),
-      waveOneCount: waveOneCount,
-      waveTwoCount: waveTwoCount,
+    return ProbeReport(
+      parsed: parsed,
+      sources: sources,
+      testedCount: sources.length,
+      usableCount: usableCount,
+      rangeCount: rangeCount,
+      totalSize: totalSize,
+      baselineHash: baseline?.firstHash,
+      plan: plan,
+      expectedSha256: expectedSha,
+      probedMs: started.elapsed.inMilliseconds,
     );
   } finally {
     client.close(force: true);

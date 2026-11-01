@@ -28,21 +28,29 @@ String _cleanInput(String input) {
   return trimmed;
 }
 
+/// Windows 与跨平台文件系统都不接受这些字符，统一替换为下划线。
+final RegExp _illegalFilenameChars = RegExp(r'[<>:"|?*\x00-\x1F]');
+final RegExp _reservedWindowsName = RegExp(
+  r'^(con|prn|aux|nul|com[1-9]|lpt[1-9])$',
+  caseSensitive: false,
+);
+
 String _sanitizeFilename(String value, String fallback) {
   var decoded = value;
   try {
     decoded = Uri.decodeComponent(value);
   } catch (_) {}
-  final base = decoded
-      .split('/')
-      .last
-      .split('\\')
-      .last
-      .replaceAll('\u0000', '')
-      .trim();
+  var base = decoded.split('/').last.split('\\').last.replaceAll('\u0000', '');
+  base = base.replaceAll(_illegalFilenameChars, '_').trim();
+  // Windows 不允许文件名以空格或点结尾。
+  base = base.replaceAll(RegExp(r'[\s.]+$'), '');
   if (base.isEmpty || base == '.' || base == '..') return fallback;
+  final dot = base.lastIndexOf('.');
+  final stem = dot > 0 ? base.substring(0, dot) : base;
+  if (_reservedWindowsName.hasMatch(stem)) base = '_$base';
   if (base.runes.length > 180) {
-    return String.fromCharCodes(base.runes.take(180));
+    final shortened = String.fromCharCodes(base.runes.take(180));
+    return shortened;
   }
   return base;
 }

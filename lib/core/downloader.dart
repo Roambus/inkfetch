@@ -7,6 +7,7 @@ import 'dart:math' as math;
 import 'package:crypto/crypto.dart';
 
 import 'models.dart';
+import 'scheduler.dart';
 
 const int _maxAttempts = 9;
 const int _maxSiteErrors = 4;
@@ -36,6 +37,9 @@ class DownloadResult {
   final int averageSpeedBps;
   final List<SiteProgress> sites;
 
+  /// 是否与 GitHub 官方 digest 比对通过。
+  final bool shaVerified;
+
   const DownloadResult({
     required this.success,
     required this.cancelled,
@@ -48,28 +52,13 @@ class DownloadResult {
     this.expectedSha256,
     required this.averageSpeedBps,
     required this.sites,
+    this.shaVerified = false,
   });
 }
 
 class _PauseSignal implements Exception {}
 
 class _AbortSignal implements Exception {}
-
-(int, int, int?)? _parseContentRange(String value) {
-  if (!value.startsWith('bytes ')) return null;
-  final rest = value.substring(6);
-  final slash = rest.indexOf('/');
-  if (slash < 0) return null;
-  final rangePart = rest.substring(0, slash);
-  final totalPart = rest.substring(slash + 1);
-  final dash = rangePart.indexOf('-');
-  if (dash < 0) return null;
-  final start = int.tryParse(rangePart.substring(0, dash).trim());
-  final end = int.tryParse(rangePart.substring(dash + 1).trim());
-  if (start == null || end == null) return null;
-  final total = totalPart.trim() == '*' ? null : int.tryParse(totalPart.trim());
-  return (start, end, total);
-}
 
 class _ChunkFailure implements Exception {
   final String message;
@@ -142,6 +131,7 @@ class DownloadJob {
   final List<SiteAllocation> _sites = [];
   final List<SiteProgress> _siteProgress = [];
   final Map<int, SiteProgress> _progressByIndex = {};
+  final Map<int, int> _passErrors = {};
 
   int _inflightBytes = 0;
   int _lastSampleBytes = 0;
@@ -153,6 +143,7 @@ class DownloadJob {
   bool _cancelled = false;
   String? _fatalError;
   bool _verifying = false;
+  bool _shaVerified = false;
   String? _sidecarPath;
   Timer? _sidecarTimer;
   Future<void> _sidecarPending = Future<void>.value();
@@ -175,6 +166,7 @@ class DownloadJob {
   void pause() {
     if (!_running) return;
     _paused = true;
+    unawaited(_flushAndPersist());
     _emit(DownloadPhase.paused);
   }
 
@@ -243,9 +235,6 @@ class DownloadJob {
       _raf = null;
       _stopTimers();
       await _sidecarPending;
-      try {
-        if (_sidecarPath != null) await File(_sidecarPath!).delete();
-      } catch (_) {}
 
       String? hash;
       if (verifySha) {
@@ -257,14 +246,21 @@ class DownloadJob {
           return _result(false, error: '校验文件失败：$error');
         }
         final expected = report.expectedSha256;
-        if (expected != null &&
-            expected.isNotEmpty &&
-            hash.toLowerCase() != expected.toLowerCase()) {
-          return _result(false, error: 'SHA-256 校验失败：镜像文件可能被篡改', sha256: hash);
+        if (expected != null && expected.isNotEmpty) {
+          if (hash.toLowerCase() != expected.toLowerCase()) {
+            await _deleteSidecar();
+            return _result(
+              false,
+              error: 'SHA-256 校验失败：镜像文件可能被篡改',
+              sha256: hash,
+            );
+          }
+          _shaVerified = true;
         }
       }
       _completedBytes = _total;
       _emit(DownloadPhase.completed, sha256: hash);
+      await _deleteSidecar();
       return _result(true, sha256: hash);
     } catch (error) {
       if (_cancelled) {
@@ -326,23 +322,17 @@ class DownloadJob {
     _startSampling();
     _startSidecarTimer();
 
-    final alive = <int>[];
-    for (var i = 0; i < _sites.length; i++) {
-      alive.add(i);
-    }
+    final alive = <int>{for (var i = 0; i < _sites.length; i++) i};
 
     var pass = 0;
-    while (pass < 3 && _queue.isNotEmpty && !_abort) {
-      final workerSites = <int>[];
-      for (final siteIndex in alive) {
-        final connections = math.max(
-          1,
-          math.min(maxConnections, _sites[siteIndex].connections),
-        );
-        for (var c = 0; c < connections; c++) {
-          workerSites.add(siteIndex);
-        }
+    while (pass < 4 && _queue.isNotEmpty && !_abort) {
+      // 每轮重新启用被限流的镜像，并按本轮实测速度重新分配连接数，
+      // 避免一次失败就永久丢弃某个源。
+      for (final index in alive) {
+        _progressByIndex[index]?.disabled = false;
       }
+      _passErrors.clear();
+      final workerSites = _planPassWorkers(alive);
       if (workerSites.isEmpty) break;
       final workerCount = workerSites.length;
       final workers = <Future<void>>[];
@@ -355,7 +345,7 @@ class DownloadJob {
       if (_abort) break;
       alive
         ..clear()
-        ..addAll(activeSites.where((i) => !_siteDisabled(i)));
+        ..addAll(activeSites);
       pass++;
     }
 
@@ -404,7 +394,6 @@ class DownloadJob {
         worker.activeWritten = 0;
         if (_chunkDoneBytes[chunkIndex] >= _chunkLength(chunkIndex)) {
           _completedChunkSet.add(chunkIndex);
-          _maybeWriteSidecar();
         }
       } on _PauseSignal {
         _inflightBytes = math.max(0, _inflightBytes - worker.activeWritten);
@@ -423,7 +412,10 @@ class DownloadJob {
         final progress = _progressByIndex[siteIndex]!;
         progress.errors += 1;
         progress.speedBps = 0;
-        if (progress.errors >= _maxSiteErrors) {
+        final passErrors = (_passErrors[siteIndex] ?? 0) + 1;
+        _passErrors[siteIndex] = passErrors;
+        // 只在本轮内停用，下一轮会重新启用并按实测速度重新配权。
+        if (passErrors >= _maxSiteErrors) {
           progress.disabled = true;
           activeSites.remove(siteIndex);
           _queue.insert(0, part);
@@ -458,7 +450,7 @@ class DownloadJob {
     final request = await client.getUrl(Uri.parse(worker.site.url));
     request.headers.set(HttpHeaders.rangeHeader, 'bytes=$start-$end');
     request.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
-    request.headers.set(HttpHeaders.userAgentHeader, 'OctoFetch/1.0');
+    request.headers.set(HttpHeaders.userAgentHeader, 'InkFetch/1.0');
     final response = await request.close().timeout(const Duration(seconds: 40));
     if (response.statusCode != HttpStatus.partialContent) {
       await response.drain<void>().catchError((_) {});
@@ -472,7 +464,7 @@ class DownloadJob {
     final contentRange = response.headers.value(HttpHeaders.contentRangeHeader);
     final parsedRange = contentRange == null
         ? null
-        : _parseContentRange(contentRange);
+        : parseContentRange(contentRange);
     if (parsedRange == null ||
         parsedRange.$1 != start ||
         parsedRange.$2 != end ||
@@ -541,7 +533,7 @@ class DownloadJob {
         await _raf!.setPosition(0);
         final request = await _client!.getUrl(Uri.parse(source.url));
         request.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
-        request.headers.set(HttpHeaders.userAgentHeader, 'OctoFetch/1.0');
+        request.headers.set(HttpHeaders.userAgentHeader, 'InkFetch/1.0');
         final response = await request.close().timeout(
           const Duration(seconds: 40),
         );
@@ -596,7 +588,7 @@ class DownloadJob {
       ..idleTimeout = const Duration(seconds: 30)
       ..maxConnectionsPerHost = 12
       ..autoUncompress = false
-      ..userAgent = 'OctoFetch/1.0'
+      ..userAgent = 'InkFetch/1.0'
       ..findProxy = ((uri) => HttpClient.findProxyFromEnvironment(uri));
   }
 
@@ -607,7 +599,31 @@ class DownloadJob {
     if (_abort) throw _AbortSignal();
   }
 
-  bool _siteDisabled(int index) => _progressByIndex[index]?.disabled ?? true;
+  List<int> _planPassWorkers(Set<int> alive) {
+    final indexes = alive.toList()..sort();
+    if (indexes.isEmpty) return const [];
+    final target = math.max(indexes.length, report.plan.totalConnections);
+    final caps = [
+      for (final index in indexes)
+        math.max(1, math.min(maxConnections, _sites[index].maxConns)),
+    ];
+    final weights = [
+      for (final index in indexes)
+        math.max(
+          1.0,
+          _progressByIndex[index]!.speedBps > 0
+              ? _progressByIndex[index]!.speedBps.toDouble()
+              : (_sites[index].speedBps > 0
+                    ? _sites[index].speedBps.toDouble()
+                    : _sites[index].score),
+        ),
+    ];
+    final quotas = allocate(target, weights, caps);
+    return [
+      for (var i = 0; i < indexes.length; i++)
+        for (var c = 0; c < quotas[i]; c++) indexes[i],
+    ];
+  }
 
   int _chunkLength(int index) {
     final start = index * _chunkSize;
@@ -646,7 +662,10 @@ class DownloadJob {
     if (raf == null) return;
     try {
       await _writeMutex.run(() => raf.flush());
-    } catch (_) {}
+    } catch (_) {
+      return;
+    }
+    // 只有刷盘成功后才记录分片状态，避免重启后读到“已完成但未落盘”的分片。
     _maybeWriteSidecar(force: true);
   }
 
@@ -766,6 +785,7 @@ class DownloadJob {
         progress: _total > 0
             ? (downloaded / _total).clamp(0.0, 1.0).toDouble()
             : (phase == DownloadPhase.completed ? 1.0 : 0.0),
+        shaVerified: _shaVerified,
       ),
     );
   }
@@ -793,18 +813,26 @@ class DownloadJob {
       expectedSha256: report.expectedSha256,
       averageSpeedBps: success ? avg : 0,
       sites: _siteProgress,
+      shaVerified: _shaVerified,
     );
   }
 
+  Future<void> _deleteSidecar() async {
+    final path = _sidecarPath;
+    if (path == null) return;
+    try {
+      await File(path).delete();
+    } catch (_) {}
+  }
+
+  /// 取消或失败后仍在磁盘上的部分文件与状态文件由用户显式清理。
   Future<void> _cleanupCancelled() async {
     _stopTimers();
+    try {
+      await _writeMutex.run(() => _raf?.flush() ?? Future<void>.value());
+    } catch (_) {}
+    _maybeWriteSidecar(force: true);
     await _sidecarPending;
-    try {
-      await File(destPath).delete();
-    } catch (_) {}
-    try {
-      if (_sidecarPath != null) await File(_sidecarPath!).delete();
-    } catch (_) {}
   }
 
   String _friendly(Object error) {

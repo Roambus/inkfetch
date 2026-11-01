@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
@@ -35,18 +37,29 @@ class AppController extends ChangeNotifier {
   bool downloading = false;
   bool _disposed = false;
 
+  /// 等待下载的链接队列，应用重启后仍会恢复。
+  List<String> queuedUrls = [];
+
+  /// 磁盘上存在 `.octopart` 状态文件、可以续传的任务。
+  List<IncompleteTask> incompleteTasks = [];
+
+  bool copyingToFolder = false;
+  double copyProgress = 0.0;
+
   String? _androidInternalDir;
   String? lastFolderUri;
 
   int noticeSeq = 0;
   String? notice;
 
+  int _taskSeq = 0;
+  bool _queueRunning = false;
+  bool _copyCancelled = false;
+  StreamSubscription<Map<String, dynamic>>? _nativeSub;
+
   bool get isAndroid => NativeBridge.isAndroid;
 
   bool get busy => probing || downloading;
-
-  bool get canDownload =>
-      !busy && (report != null || urlInput.trim().isNotEmpty);
 
   String get destinationLabel {
     if (isAndroid) {
@@ -66,10 +79,12 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> init() async {
+    _listenNativeEvents();
     try {
-      final (loadedSettings, loadedHistory) = await _store.load();
+      final (loadedSettings, loadedHistory, loadedQueue) = await _store.load();
       settings = loadedSettings;
       history = loadedHistory;
+      queuedUrls = loadedQueue;
       if (NativeBridge.isDesktop &&
           (settings.downloadDir == null || settings.downloadDir!.isEmpty)) {
         settings.downloadDir = await NativeBridge.defaultDownloadDir();
@@ -84,6 +99,23 @@ class AppController extends ChangeNotifier {
     } catch (_) {}
     initialized = true;
     _safeNotify();
+    await refreshIncompleteTasks();
+  }
+
+  void _listenNativeEvents() {
+    if (!isAndroid) return;
+    _nativeSub = NativeBridge.nativeEvents.listen(
+      (event) {
+        if (event['type'] != 'copyProgress') return;
+        final done = (event['done'] as num?)?.toDouble() ?? 0.0;
+        final total = (event['total'] as num?)?.toDouble() ?? 0.0;
+        copyProgress = total > 0
+            ? (done / total).clamp(0.0, 1.0).toDouble()
+            : 0.0;
+        _safeNotify();
+      },
+      onError: (_) {},
+    );
   }
 
   void _safeNotify() {
@@ -139,7 +171,7 @@ class AppController extends ChangeNotifier {
       final parsedUrl = parseGitHubUrl(urlInput);
       parsed = parsedUrl;
       _safeNotify();
-      final outcome = await probeSources(
+      final tested = await probeSources(
         parsedUrl,
         ProbeOptions(
           maxTotalConnections: settings.maxConnections,
@@ -151,18 +183,18 @@ class AppController extends ChangeNotifier {
           _safeNotify();
         },
       );
-      report = outcome.report;
+      report = tested;
       reportUrl = parsedUrl.normalized;
       _probedAt = DateTime.now();
       probeMessage = '';
       if (!silent) {
-        final plan = outcome.report.plan;
+        final plan = tested.plan;
         _emitNotice(
-          '测试完成：${outcome.report.usableCount} 个可用源，'
+          '测试完成：${tested.usableCount} 个可用源，'
           '${plan.totalConnections} 条连接',
         );
       }
-      return outcome.report;
+      return tested;
     } catch (error) {
       probeError = error is UrlParseException
           ? error.message
@@ -176,8 +208,20 @@ class AppController extends ChangeNotifier {
     }
   }
 
+  String _newTaskId() {
+    _taskSeq = (_taskSeq + 1) % 100000;
+    return 'task-${DateTime.now().millisecondsSinceEpoch}-$_taskSeq';
+  }
+
   Future<void> startDownload() async {
-    if (downloading || probing) return;
+    if (probing) return;
+    if (downloading) {
+      // 正在下载时再次点击，把链接加入队列而不是直接丢弃。
+      final trimmed = urlInput.trim();
+      if (trimmed.isNotEmpty) _enqueue(trimmed);
+      return;
+    }
+
     ProbeReport? current = report;
     if (current == null || reportUrl != parsed?.normalized) {
       current = await probe(silent: true);
@@ -191,12 +235,16 @@ class AppController extends ChangeNotifier {
       return;
     }
 
+    final taskId = _newTaskId();
+    final startedAt = DateTime.now();
+    final filename = current.parsed.filename;
+
     downloading = true;
     _safeNotify();
     snapshot = DownloadSnapshot(
-      taskId: 'task-${DateTime.now().millisecondsSinceEpoch}',
+      taskId: taskId,
       phase: DownloadPhase.downloading,
-      filename: current.parsed.filename,
+      filename: filename,
       destPath: '',
       downloaded: 0,
       total: current.totalSize ?? 0,
@@ -225,15 +273,24 @@ class AppController extends ChangeNotifier {
 
     String destPath;
     try {
-      destPath = await _prepareDestination(current.parsed.filename);
+      destPath = await _prepareDestination(filename);
     } catch (error) {
+      // 不能只弹一条提示：下载状态必须切换到失败，否则界面会永远停在“下载中”。
       downloading = false;
+      snapshot = snapshot?.copyWith(
+        phase: DownloadPhase.failed,
+        error: '无法创建下载目录：$error',
+      );
       _emitNotice('无法创建下载目录：$error');
       _safeNotify();
+      await refreshIncompleteTasks();
+      unawaited(_startNextQueued());
       return;
     }
 
-    final taskId = 'task-${DateTime.now().millisecondsSinceEpoch}';
+    snapshot = snapshot?.copyWith(destPath: destPath);
+    _safeNotify();
+
     final job = DownloadJob(
       taskId: taskId,
       parsed: current.parsed,
@@ -249,6 +306,10 @@ class AppController extends ChangeNotifier {
     _job = job;
     lastFolderUri = settings.androidTreeUri;
 
+    if (isAndroid) {
+      unawaited(NativeBridge.startDownloadNotification(title: filename));
+    }
+
     DownloadResult result;
     try {
       result = await job.run();
@@ -258,29 +319,46 @@ class AppController extends ChangeNotifier {
         cancelled: false,
         error: _friendly(error),
         destPath: destPath,
-        filename: current.parsed.filename,
+        filename: filename,
         total: current.totalSize ?? 0,
         elapsedMs: 0,
         averageSpeedBps: 0,
         sites: const [],
       );
+    } finally {
+      if (isAndroid) unawaited(NativeBridge.stopDownloadNotification());
+      _job = null;
     }
 
     var finalPath = destPath;
     String? savedUri;
     var saveNote = result.error;
+
     if (result.success && isAndroid && settings.androidTreeUri != null) {
-      final saved = await NativeBridge.saveToTree(
-        srcPath: destPath,
-        treeUri: settings.androidTreeUri!,
-        fileName: current.parsed.filename,
-      );
+      _copyCancelled = false;
+      copyingToFolder = true;
+      copyProgress = 0.0;
+      _safeNotify();
+      SavedFile? saved;
+      try {
+        saved = await NativeBridge.saveToTree(
+          srcPath: destPath,
+          treeUri: settings.androidTreeUri!,
+          fileName: filename,
+        );
+      } finally {
+        copyingToFolder = false;
+        copyProgress = 0.0;
+      }
       if (saved != null) {
         finalPath = '${settings.androidTreeName ?? '已选文件夹'}/${saved.name}';
         savedUri = saved.uri;
         try {
           await File(destPath).delete();
         } catch (_) {}
+      } else if (_copyCancelled) {
+        saveNote = '已取消复制，文件保留在应用目录';
+        _emitNotice(saveNote);
       } else {
         saveNote = '复制到所选文件夹失败，文件暂存在应用目录';
         _emitNotice(saveNote);
@@ -290,8 +368,8 @@ class AppController extends ChangeNotifier {
     final completed = result.success;
     final entry = HistoryEntry(
       taskId: taskId,
-      filename: current.parsed.filename,
-      url: urlInput.trim(),
+      filename: filename,
+      url: current.parsed.normalized,
       destPath: finalPath,
       savedUri: savedUri,
       folderUri: settings.androidTreeUri,
@@ -302,7 +380,7 @@ class AppController extends ChangeNotifier {
       status: result.cancelled
           ? 'cancelled'
           : (completed ? 'completed' : 'failed'),
-      createdAt: DateTime.now(),
+      createdAt: startedAt,
       finishedAt: DateTime.now(),
       error: result.cancelled ? null : saveNote,
     );
@@ -317,12 +395,12 @@ class AppController extends ChangeNotifier {
         destPath: finalPath,
         savedUri: savedUri,
         error: result.error,
+        shaVerified: result.shaVerified,
       );
     }
     downloading = false;
-    _job = null;
     if (result.cancelled) {
-      _emitNotice('下载已取消');
+      _emitNotice('下载已取消，未完成的分片已保留，可在下方继续');
     } else if (completed) {
       _emitNotice(
         '下载完成：${humanBytes(result.total)}，'
@@ -332,6 +410,9 @@ class AppController extends ChangeNotifier {
       _emitNotice(result.error ?? '下载失败');
     }
     _safeNotify();
+
+    await refreshIncompleteTasks();
+    unawaited(_startNextQueued());
   }
 
   Future<String> _prepareDestination(String filename) async {
@@ -370,6 +451,175 @@ class AppController extends ChangeNotifier {
       counter++;
     }
     return candidate;
+  }
+
+  void _enqueue(String url) {
+    final trimmed = url.trim();
+    if (trimmed.isEmpty) return;
+    if (queuedUrls.contains(trimmed)) {
+      _emitNotice('该链接已在下载队列中');
+      return;
+    }
+    if (!queuedUrls.contains(trimmed)) {
+      queuedUrls.add(trimmed);
+      unawaited(_store.saveQueue(queuedUrls));
+      _emitNotice('已加入下载队列（第 ${queuedUrls.length} 个）');
+    }
+  }
+
+  Future<void> _startNextQueued() async {
+    if (_queueRunning || downloading || probing || queuedUrls.isEmpty) return;
+    _queueRunning = true;
+    try {
+      while (queuedUrls.isNotEmpty && !downloading && !_disposed) {
+        final next = queuedUrls.removeAt(0);
+        unawaited(_store.saveQueue(queuedUrls));
+        urlInput = next;
+        report = null;
+        reportUrl = null;
+        parsed = null;
+        probeError = null;
+        probeMessage = '';
+        _safeNotify();
+        await startDownload();
+      }
+    } finally {
+      _queueRunning = false;
+      _safeNotify();
+    }
+  }
+
+  Future<void> cancelQueued(int index) async {
+    if (index < 0 || index >= queuedUrls.length) return;
+    final removed = queuedUrls.removeAt(index);
+    await _store.saveQueue(queuedUrls);
+    _emitNotice('已移出队列：${_basename(removed)}');
+  }
+
+  Future<void> clearQueue() async {
+    if (queuedUrls.isEmpty) return;
+    queuedUrls.clear();
+    await _store.saveQueue(queuedUrls);
+    _emitNotice('下载队列已清空');
+  }
+
+  Future<void> refreshIncompleteTasks() async {
+    final roots = <String>{};
+    if (isAndroid) {
+      final dir = _androidInternalDir;
+      if (dir != null && dir.isNotEmpty) roots.add(dir);
+    } else {
+      final dir = settings.downloadDir;
+      if (dir != null && dir.isNotEmpty) roots.add(dir);
+    }
+    final tasks = <IncompleteTask>[];
+    for (final root in roots) {
+      final dir = Directory(root);
+      if (!await dir.exists()) continue;
+      try {
+        await for (final entity in dir.list(followLinks: false)) {
+          if (entity is! File) continue;
+          final path = entity.path;
+          if (!path.endsWith('.octopart')) continue;
+          try {
+            final json =
+                jsonDecode(await entity.readAsString()) as Map<String, dynamic>;
+            final url = json['url'] as String?;
+            final total = json['total'] as int? ?? 0;
+            final chunkSize = json['chunkSize'] as int? ?? 0;
+            final chunkCount = json['chunkCount'] as int? ?? 0;
+            final completed = (json['completed'] as List<dynamic>? ?? [])
+                .map((e) => e as num)
+                .map((e) => e.toInt())
+                .toList();
+            final destPath = path.substring(
+              0,
+              path.length - '.octopart'.length,
+            );
+            if (url == null || url.isEmpty || total <= 0) continue;
+            // 下载过程中的临时状态文件也属于未完成任务，但当前任务单独展示。
+            tasks.add(
+              IncompleteTask(
+                url: url,
+                destPath: destPath,
+                filename: _basename(destPath),
+                total: total,
+                downloaded: _completedBytes(
+                  completed,
+                  chunkSize,
+                  total,
+                ),
+                chunkCount: chunkCount,
+                completedChunks: completed.length,
+              ),
+            );
+          } catch (_) {}
+        }
+      } catch (_) {}
+    }
+    tasks.sort((a, b) => a.filename.compareTo(b.filename));
+    incompleteTasks = tasks;
+    _safeNotify();
+  }
+
+  int _completedBytes(List<int> indexes, int chunkSize, int total) {
+    if (chunkSize <= 0) return 0;
+    var sum = 0;
+    for (final index in indexes) {
+      final start = index * chunkSize;
+      if (start >= total) continue;
+      sum += math.min(chunkSize, total - start);
+    }
+    return sum;
+  }
+
+  Future<void> resumeIncomplete(IncompleteTask task) async {
+    if (downloading) {
+      _enqueue(task.url);
+      return;
+    }
+    urlInput = task.url;
+    report = null;
+    reportUrl = null;
+    parsed = null;
+    probeError = null;
+    probeMessage = '';
+    _safeNotify();
+    await startDownload();
+  }
+
+  Future<void> deleteIncomplete(IncompleteTask task) async {
+    if (downloading) return;
+    try {
+      await File(task.destPath).delete();
+    } catch (_) {}
+    try {
+      await File('${task.destPath}.octopart').delete();
+    } catch (_) {}
+    await refreshIncompleteTasks();
+    _emitNotice('已删除未完成文件');
+  }
+
+  Future<void> deleteCurrentPartial() async {
+    if (downloading) return;
+    final current = snapshot;
+    if (current == null || current.destPath.isEmpty) return;
+    final path = current.destPath;
+    try {
+      await File(path).delete();
+    } catch (_) {}
+    try {
+      await File('$path.octopart').delete();
+    } catch (_) {}
+    snapshot = null;
+    await refreshIncompleteTasks();
+    _emitNotice('已删除未完成文件');
+  }
+
+  Future<void> cancelFolderCopy() async {
+    if (!isAndroid || !copyingToFolder) return;
+    _copyCancelled = true;
+    await NativeBridge.cancelFolderCopy();
   }
 
   void pauseDownload() {
@@ -531,6 +781,13 @@ class AppController extends ChangeNotifier {
     if (!ok) _emitNotice('无法打开文件夹');
   }
 
+  String _basename(String path) {
+    final slash = path.lastIndexOf(Platform.pathSeparator);
+    final alt = path.lastIndexOf('/');
+    final index = math.max(slash, alt);
+    return index < 0 ? path : path.substring(index + 1);
+  }
+
   String _friendly(Object error) {
     final text = error.toString();
     if (text.contains('SocketException') || text.contains('网络')) {
@@ -544,6 +801,7 @@ class AppController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    unawaited(_nativeSub?.cancel() ?? Future<void>.value());
     super.dispose();
   }
 }

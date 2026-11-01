@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../core/format.dart';
-import '../../core/models.dart';
-import '../../state/app_controller.dart';
+import '../core/format.dart';
+import '../core/models.dart';
+import '../state/app_controller.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -17,17 +17,40 @@ class DownloadPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final snapshot = c.snapshot;
     if (snapshot == null) {
-      return EmptyState(
-        icon: Icons.cloud_download_rounded,
-        title: '暂无进行中的下载',
-        description:
-            '在下载页粘贴 GitHub 链接，点击底部的「开始下载」即可。'
-            '下载按钮固定在底部，不需要滚动。',
-        action: FilledButton.icon(
-          onPressed: () => c.setTab(0),
-          icon: const Icon(Icons.add_link_rounded, size: 18),
-          label: const Text('去下载'),
-        ),
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(18, 14, 18, 28),
+        children: [
+          Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 960),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  EmptyState(
+                    icon: Icons.cloud_download_rounded,
+                    title: '暂无进行中的下载',
+                    description:
+                        '在首页粘贴 GitHub 链接，点击底部的「开始下载」即可。'
+                        '下载按钮固定在底部，不需要滚动。',
+                    action: FilledButton.icon(
+                      onPressed: () => c.setTab(0),
+                      icon: const Icon(Icons.add_link_rounded, size: 18),
+                      label: const Text('去下载'),
+                    ),
+                  ),
+                  if (c.queuedUrls.isNotEmpty) ...[
+                    const SizedBox(height: 14),
+                    _buildQueueCard(context),
+                  ],
+                  if (c.incompleteTasks.isNotEmpty) ...[
+                    const SizedBox(height: 14),
+                    _buildIncompleteCard(context),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
       );
     }
 
@@ -42,6 +65,10 @@ class DownloadPage extends StatelessWidget {
               _buildHeader(context, snapshot),
               const SizedBox(height: 14),
               _buildProgressCard(context, snapshot),
+              if (c.copyingToFolder) ...[
+                const SizedBox(height: 14),
+                _buildCopyCard(context),
+              ],
               if (snapshot.error != null &&
                   snapshot.phase != DownloadPhase.failed) ...[
                 const SizedBox(height: 14),
@@ -53,6 +80,10 @@ class DownloadPage extends StatelessWidget {
                 const SizedBox(height: 14),
                 _buildResultActions(context, snapshot),
               ],
+              if (c.queuedUrls.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                _buildQueueCard(context),
+              ],
               const SizedBox(height: 14),
               _buildSitesCard(context, snapshot),
               const SizedBox(height: 14),
@@ -60,6 +91,179 @@ class DownloadPage extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildQueueCard(BuildContext context) {
+    final muted = Theme.of(context).colorScheme.onSurface
+        .withValues(alpha: 0.5);
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SectionHeader(
+            title: '下载队列',
+            subtitle: '当前任务结束后自动依次下载，共 ${c.queuedUrls.length} 个',
+            trailing: TextButton(
+              onPressed: c.clearQueue,
+              child: const Text('清空'),
+            ),
+          ),
+          const SizedBox(height: 4),
+          for (var i = 0; i < c.queuedUrls.length; i++)
+            Row(
+              children: [
+                const Icon(Icons.schedule_rounded, size: 15),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    c.queuedUrls[i],
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 12, color: muted),
+                  ),
+                ),
+                IconButton(
+                  tooltip: '移出队列',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () => c.cancelQueued(i),
+                  icon: const Icon(Icons.close_rounded, size: 16),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildIncompleteCard(BuildContext context) {
+    final muted = Theme.of(context).colorScheme.onSurface
+        .withValues(alpha: 0.5);
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SectionHeader(
+            title: '未完成的下载',
+            subtitle: '重启后仍可继续，已完成的分片不会重复下载',
+          ),
+          const SizedBox(height: 8),
+          for (final task in c.incompleteTasks)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 7),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.restore_rounded,
+                        size: 16,
+                        color: kAccentAlt,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          task.filename,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      Text(
+                        '${(task.progress * 100).toStringAsFixed(1)}%',
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: kAccentAlt,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 5),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(5),
+                    child: LinearProgressIndicator(
+                      value: task.progress,
+                      minHeight: 4,
+                      backgroundColor: Theme.of(context).colorScheme.onSurface
+                          .withValues(alpha: 0.08),
+                      color: kAccentAlt,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '${humanBytes(task.downloaded)} / '
+                          '${humanBytes(task.total)} · '
+                          '${task.completedChunks}/${task.chunkCount} 分片',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 11, color: muted),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () => c.resumeIncomplete(task),
+                        child: const Text('继续'),
+                      ),
+                      TextButton(
+                        onPressed: () => c.deleteIncomplete(task),
+                        child: const Text('删除'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCopyCard(BuildContext context) {
+    final muted = Theme.of(context).colorScheme.onSurface
+        .withValues(alpha: 0.5);
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SectionHeader(
+            title: '正在复制到所选文件夹',
+            subtitle: '复制完成后会自动删除应用目录里的临时文件',
+          ),
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: LinearProgressIndicator(
+              value: c.copyProgress,
+              minHeight: 8,
+              backgroundColor: Theme.of(context).colorScheme.onSurface
+                  .withValues(alpha: 0.08),
+              color: kAccent,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Text(
+                '${(c.copyProgress * 100).toStringAsFixed(1)}%',
+                style: TextStyle(fontSize: 11.5, color: muted),
+              ),
+              const Spacer(),
+              OutlinedButton.icon(
+                onPressed: c.cancelFolderCopy,
+                icon: const Icon(Icons.stop_rounded, size: 17),
+                label: const Text('取消复制'),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -137,12 +341,23 @@ class DownloadPage extends StatelessWidget {
                   icon: const Icon(Icons.add_rounded, size: 18),
                   label: const Text('新的下载'),
                 ),
-                if (snapshot.phase == DownloadPhase.failed)
+                if (snapshot.phase == DownloadPhase.failed ||
+                    snapshot.phase == DownloadPhase.cancelled) ...[
                   OutlinedButton.icon(
                     onPressed: c.startDownload,
                     icon: const Icon(Icons.refresh_rounded, size: 18),
-                    label: const Text('重试下载'),
+                    label: Text(
+                      snapshot.phase == DownloadPhase.cancelled
+                          ? '继续下载'
+                          : '重试下载',
+                    ),
                   ),
+                  OutlinedButton.icon(
+                    onPressed: c.deleteCurrentPartial,
+                    icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                    label: const Text('删除未完成文件'),
+                  ),
+                ],
               ],
             ],
           ),
@@ -383,7 +598,9 @@ class DownloadPage extends StatelessWidget {
                     const SizedBox(width: 7),
                     Expanded(
                       child: Text(
-                        'SHA-256  ${snapshot.sha256}',
+                        snapshot.shaVerified
+                            ? 'SHA-256（已与 GitHub 官方 digest 一致）  ${snapshot.sha256}'
+                            : 'SHA-256（已计算，未与官方比对）  ${snapshot.sha256}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -421,11 +638,6 @@ class DownloadPage extends StatelessWidget {
                   onPressed: c.openCurrentFolder,
                   icon: const Icon(Icons.folder_open_rounded, size: 18),
                   label: const Text('打开文件夹'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: c.pickDownloadDirectory,
-                  icon: const Icon(Icons.drive_file_move_rounded, size: 18),
-                  label: const Text('更改保存位置'),
                 ),
               ],
             ),

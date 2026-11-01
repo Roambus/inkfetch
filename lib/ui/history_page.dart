@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../core/format.dart';
-import '../../core/models.dart';
-import '../../state/app_controller.dart';
+import '../core/format.dart';
+import '../core/models.dart';
+import '../state/app_controller.dart';
 import 'theme.dart';
 import 'widgets.dart';
 

@@ -6,18 +6,18 @@ import 'ui/theme.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(OctoFetchApp(controller: AppController()));
+  runApp(InkFetchApp(controller: AppController()));
 }
 
-class OctoFetchApp extends StatefulWidget {
+class InkFetchApp extends StatefulWidget {
   final AppController controller;
-  const OctoFetchApp({super.key, required this.controller});
+  const InkFetchApp({super.key, required this.controller});
 
   @override
-  State<OctoFetchApp> createState() => _OctoFetchAppState();
+  State<InkFetchApp> createState() => _InkFetchAppState();
 }
 
-class _OctoFetchAppState extends State<OctoFetchApp> {
+class _InkFetchAppState extends State<InkFetchApp> {
   @override
   void initState() {
     super.initState();
@@ -36,7 +36,7 @@ class _OctoFetchAppState extends State<OctoFetchApp> {
           _ => ThemeMode.system,
         };
         return MaterialApp(
-          title: 'OctoFetch',
+          title: 'InkFetch',
           debugShowCheckedModeBanner: false,
           theme: buildAppTheme(Brightness.light),
           darkTheme: buildAppTheme(Brightness.dark),

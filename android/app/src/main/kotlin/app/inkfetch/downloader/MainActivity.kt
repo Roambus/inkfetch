@@ -1,4 +1,4 @@
-package app.octofetch.octofetch
+package app.inkfetch.downloader
 
 import android.app.Activity
 import android.content.Intent
@@ -9,18 +9,24 @@ import android.webkit.MimeTypeMap
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.util.concurrent.Executors
 
 class MainActivity : FlutterActivity() {
     companion object {
-        private const val CHANNEL = "app.octofetch/native"
+        private const val CHANNEL = "app.inkfetch/native"
+        private const val EVENT_CHANNEL = "app.inkfetch/native_events"
         private const val REQUEST_TREE = 4201
     }
 
     private var pendingResult: MethodChannel.Result? = null
+    private var eventSink: EventChannel.EventSink? = null
     private val ioExecutor = Executors.newSingleThreadExecutor()
+
+    @Volatile
+    private var cancelCopy = false
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -39,10 +45,13 @@ class MainActivity : FlutterActivity() {
                         if (src == null || tree == null) {
                             result.error("bad_args", "缺少保存参数", null)
                         } else {
+                            cancelCopy = false
                             ioExecutor.execute {
                                 try {
                                     val saved = saveToTree(src, tree, name)
                                     runOnUiThread { result.success(saved) }
+                                } catch (cancelled: CopyCancelledException) {
+                                    runOnUiThread { result.success(null) }
                                 } catch (error: Throwable) {
                                     runOnUiThread {
                                         result.error(
@@ -54,6 +63,19 @@ class MainActivity : FlutterActivity() {
                                 }
                             }
                         }
+                    }
+                    "cancelCopyToDirectory" -> {
+                        cancelCopy = true
+                        result.success(true)
+                    }
+                    "startDownloadService" -> {
+                        val title = call.argument<String>("title") ?: "正在下载"
+                        DownloadForegroundService.start(this, title)
+                        result.success(true)
+                    }
+                    "stopDownloadService" -> {
+                        DownloadForegroundService.stop(this)
+                        result.success(true)
                     }
                     "openFile" -> {
                         val uri = call.argument<String>("uri")
@@ -68,6 +90,30 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+
+        EventChannel(flutterEngine.dartExecutor.binaryMessenger, EVENT_CHANNEL)
+            .setStreamHandler(object : EventChannel.StreamHandler {
+                override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                    eventSink = events
+                }
+
+                override fun onCancel(arguments: Any?) {
+                    eventSink = null
+                }
+            })
+    }
+
+    private fun emitProgress(done: Long, total: Long) {
+        val sink = eventSink ?: return
+        runOnUiThread {
+            sink.success(
+                mapOf(
+                    "type" to "copyProgress",
+                    "done" to done,
+                    "total" to total
+                )
+            )
+        }
     }
 
     private fun launchDirectoryPicker(result: MethodChannel.Result) {
@@ -191,10 +237,36 @@ class MainActivity : FlutterActivity() {
             name
         ) ?: throw IllegalStateException("无法在所选文件夹中创建文件")
 
-        File(srcPath).inputStream().use { input ->
-            val output = contentResolver.openOutputStream(documentUri)
-                ?: throw IllegalStateException("无法写入所选文件夹")
-            output.use { out -> input.copyTo(out, 256 * 1024) }
+        val source = File(srcPath)
+        val total = source.length()
+        var done = 0L
+        emitProgress(0L, total)
+        try {
+            source.inputStream().use { input ->
+                val output = contentResolver.openOutputStream(documentUri)
+                    ?: throw IllegalStateException("无法写入所选文件夹")
+                output.use { out ->
+                    val buffer = ByteArray(256 * 1024)
+                    while (true) {
+                        if (cancelCopy) throw CopyCancelledException()
+                        val read = input.read(buffer)
+                        if (read <= 0) break
+                        out.write(buffer, 0, read)
+                        done += read
+                        emitProgress(done, total)
+                    }
+                    out.flush()
+                }
+            }
+        } catch (error: Throwable) {
+            // 复制中断时删除半成品，避免在用户文件夹里留下残文件。
+            try {
+                DocumentsContract.deleteDocument(contentResolver, documentUri)
+            } catch (_: Throwable) {
+            }
+            throw error
+        } finally {
+            emitProgress(total, total)
         }
 
         return mapOf(
@@ -296,3 +368,5 @@ class MainActivity : FlutterActivity() {
         }
     }
 }
+
+class CopyCancelledException : Exception("已取消复制")

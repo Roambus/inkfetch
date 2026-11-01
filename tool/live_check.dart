@@ -1,10 +1,10 @@
 import 'dart:io';
 
-import 'package:octofetch/core/downloader.dart';
-import 'package:octofetch/core/format.dart';
-import 'package:octofetch/core/models.dart';
-import 'package:octofetch/core/probe.dart';
-import 'package:octofetch/core/url_parser.dart';
+import 'package:inkfetch/core/downloader.dart';
+import 'package:inkfetch/core/format.dart';
+import 'package:inkfetch/core/models.dart';
+import 'package:inkfetch/core/probe.dart';
+import 'package:inkfetch/core/url_parser.dart';
 
 /// 手动联网检查脚本：dart run tool/live_check.dart [url]
 /// 会真实测试全部镜像并下载一个文件，用于验证镜像可用性。
@@ -16,12 +16,11 @@ Future<void> main(List<String> args) async {
   stdout.writeln('URL: ${parsed.normalized}');
   stdout.writeln('文件: ${parsed.filename} (${kindLabel(parsed.kind)})');
 
-  final outcome = await probeSources(
+  final report = await probeSources(
     parsed,
     const ProbeOptions(probeBytes: 1024 * 1024),
     onProgress: (m) => stdout.writeln(m),
   );
-  final report = outcome.report;
   stdout.writeln('');
   stdout.writeln(
     '测试 ${report.testedCount} 个源，'
@@ -49,7 +48,7 @@ Future<void> main(List<String> args) async {
     exit(1);
   }
 
-  final temp = await Directory.systemTemp.createTemp('octofetch_live_');
+  final temp = await Directory.systemTemp.createTemp('inkfetch_live_');
   final dest = '${temp.path}/${parsed.filename}';
   final job = DownloadJob(
     taskId: 'live',

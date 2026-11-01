@@ -1,15 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:octofetch/main.dart';
-import 'package:octofetch/state/app_controller.dart';
+import 'package:inkfetch/main.dart';
+import 'package:inkfetch/state/app_controller.dart';
 
 void main() {
   testWidgets('首页固定底部下载栏与导航', (tester) async {
     final controller = AppController();
-    await tester.pumpWidget(OctoFetchApp(controller: controller));
+    await tester.pumpWidget(InkFetchApp(controller: controller));
     await tester.pumpAndSettle();
 
-    expect(find.text('OctoFetch'), findsOneWidget);
+    expect(find.text('InkFetch'), findsOneWidget);
     expect(find.text('开始下载'), findsOneWidget);
     expect(find.text('下载'), findsWidgets);
     expect(find.text('记录'), findsWidgets);
@@ -25,7 +25,7 @@ void main() {
 
   testWidgets('切换记录与设置页', (tester) async {
     final controller = AppController();
-    await tester.pumpWidget(OctoFetchApp(controller: controller));
+    await tester.pumpWidget(InkFetchApp(controller: controller));
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('记录').last);
@@ -41,7 +41,7 @@ void main() {
 
   testWidgets('示例链接会填入输入框', (tester) async {
     final controller = AppController();
-    await tester.pumpWidget(OctoFetchApp(controller: controller));
+    await tester.pumpWidget(InkFetchApp(controller: controller));
     await tester.pumpAndSettle();
 
     final example = find.textContaining('github.com/rust-lang').first;

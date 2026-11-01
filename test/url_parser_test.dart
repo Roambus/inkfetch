@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:octofetch/core/url_parser.dart';
-import 'package:octofetch/core/models.dart';
+import 'package:inkfetch/core/url_parser.dart';
+import 'package:inkfetch/core/models.dart';
 
 void main() {
   group('URL 解析', () {

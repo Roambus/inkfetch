@@ -1,8 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:octofetch/core/mirrors.dart';
-import 'package:octofetch/core/models.dart';
-import 'package:octofetch/core/scheduler.dart';
-import 'package:octofetch/core/url_parser.dart';
+import 'package:inkfetch/core/mirrors.dart';
+import 'package:inkfetch/core/models.dart';
+import 'package:inkfetch/core/scheduler.dart';
+import 'package:inkfetch/core/url_parser.dart';
 
 SourceProbe _source(String id, int speed, int maxConns, bool range) {
   return SourceProbe(

@@ -20,7 +20,14 @@ class SavedFile {
 }
 
 class NativeBridge {
-  static const MethodChannel _channel = MethodChannel('app.octofetch/native');
+  static const MethodChannel _channel = MethodChannel('app.inkfetch/native');
+  static const EventChannel _events = EventChannel('app.inkfetch/native_events');
+
+  /// Android 原生事件流（当前用于“复制到所选文件夹”的进度）。
+  static Stream<Map<String, dynamic>> get nativeEvents =>
+      _events.receiveBroadcastStream().map(
+        (event) => Map<String, dynamic>.from(event as Map),
+      );
 
   static bool get isAndroid => Platform.isAndroid;
   static bool get isDesktop =>
@@ -91,6 +98,31 @@ class NativeBridge {
     } catch (_) {
       return null;
     }
+  }
+
+  /// 开始前台服务，避免应用切到后台后下载被系统回收。
+  static Future<void> startDownloadNotification({required String title}) async {
+    if (!isAndroid) return;
+    try {
+      await _channel.invokeMethod<bool>('startDownloadService', {
+        'title': title,
+      });
+    } catch (_) {}
+  }
+
+  static Future<void> stopDownloadNotification() async {
+    if (!isAndroid) return;
+    try {
+      await _channel.invokeMethod<bool>('stopDownloadService');
+    } catch (_) {}
+  }
+
+  /// 取消正在进行的“复制到所选文件夹”。
+  static Future<void> cancelFolderCopy() async {
+    if (!isAndroid) return;
+    try {
+      await _channel.invokeMethod<bool>('cancelCopyToDirectory');
+    } catch (_) {}
   }
 
   static Future<bool> openFile({String? uri, String? path}) async {

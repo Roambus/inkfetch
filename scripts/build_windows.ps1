@@ -1,5 +1,5 @@
-# OctoFetch Windows build script
-# Requires Flutter SDK 3.47.9 and Visual Studio 2022
+# InkFetch Windows build script
+# Requires Flutter SDK 3.47.0+ and Visual Studio 2022
 # with the "Desktop development with C++" workload.
 
 $ErrorActionPreference = "Stop"
@@ -18,7 +18,7 @@ if (!(Test-Path $releaseDir)) {
 
 $distDir = "dist"
 New-Item -ItemType Directory -Force -Path $distDir | Out-Null
-$zipPath = Join-Path $distDir "OctoFetch-windows-x64.zip"
+$zipPath = Join-Path $distDir "InkFetch-windows-x64.zip"
 
 Write-Host "==> packaging portable zip" -ForegroundColor Cyan
 if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
@@ -26,7 +26,7 @@ Compress-Archive -Path "$releaseDir\*" -DestinationPath $zipPath
 
 Write-Host ""
 Write-Host "Done." -ForegroundColor Green
-Write-Host "Run:       $releaseDir\OctoFetch.exe"
+Write-Host "Run:       $releaseDir\InkFetch.exe"
 Write-Host "Portable:  $zipPath (unzip anywhere, no installer needed)"
 Write-Host ""
 Write-Host "Note: Flutter desktop apps ship as a folder with DLLs and data/."

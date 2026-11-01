@@ -1,3 +1,21 @@
+/// 解析 `Content-Range: bytes 0-1023/1048576` 响应头。
+/// 返回 (起始字节, 结束字节, 总大小)，总大小为 `*` 或缺失时返回 null。
+(int, int, int?)? parseContentRange(String value) {
+  if (!value.startsWith('bytes ')) return null;
+  final rest = value.substring(6);
+  final slash = rest.indexOf('/');
+  if (slash < 0) return null;
+  final rangePart = rest.substring(0, slash);
+  final totalPart = rest.substring(slash + 1);
+  final dash = rangePart.indexOf('-');
+  if (dash < 0) return null;
+  final start = int.tryParse(rangePart.substring(0, dash).trim());
+  final end = int.tryParse(rangePart.substring(dash + 1).trim());
+  if (start == null || end == null) return null;
+  final total = totalPart.trim() == '*' ? null : int.tryParse(totalPart.trim());
+  return (start, end, total);
+}
+
 enum UrlKind { raw, release, archive, gist }
 
 enum MirrorKind {
@@ -404,6 +422,9 @@ class DownloadSnapshot {
   final String? savedUri;
   final double progress;
 
+  /// 是否已与 GitHub 官方 digest 比对通过（仅 Release 资产可能为 true）。
+  final bool shaVerified;
+
   const DownloadSnapshot({
     required this.taskId,
     required this.phase,
@@ -421,6 +442,7 @@ class DownloadSnapshot {
     required this.error,
     required this.savedUri,
     required this.progress,
+    this.shaVerified = false,
   });
 
   DownloadSnapshot copyWith({
@@ -438,6 +460,7 @@ class DownloadSnapshot {
     String? error,
     String? savedUri,
     double? progress,
+    bool? shaVerified,
   }) {
     return DownloadSnapshot(
       taskId: taskId,
@@ -456,8 +479,33 @@ class DownloadSnapshot {
       error: error ?? this.error,
       savedUri: savedUri ?? this.savedUri,
       progress: progress ?? this.progress,
+      shaVerified: shaVerified ?? this.shaVerified,
     );
   }
+}
+
+/// 磁盘上存在 `.octopart` 状态文件的未完成任务，应用重启后可继续下载。
+class IncompleteTask {
+  final String url;
+  final String destPath;
+  final String filename;
+  final int total;
+  final int downloaded;
+  final int chunkCount;
+  final int completedChunks;
+
+  const IncompleteTask({
+    required this.url,
+    required this.destPath,
+    required this.filename,
+    required this.total,
+    required this.downloaded,
+    required this.chunkCount,
+    required this.completedChunks,
+  });
+
+  double get progress =>
+      total > 0 ? (downloaded / total).clamp(0.0, 1.0).toDouble() : 0.0;
 }
 
 class HistoryEntry {

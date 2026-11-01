@@ -1,15 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
-import '../../core/format.dart';
-import '../../core/mirrors.dart';
-import '../../core/models.dart';
-import '../../state/app_controller.dart';
+import '../core/format.dart';
+import '../core/mirrors.dart';
+import '../core/models.dart';
+import '../state/app_controller.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
 class SettingsPage extends StatelessWidget {
   final AppController controller;
   const SettingsPage({super.key, required this.controller});
+
+  static final Future<PackageInfo> _packageInfo = PackageInfo.fromPlatform();
 
   AppController get c => controller;
 
@@ -124,7 +127,7 @@ class SettingsPage extends StatelessWidget {
           if (c.isAndroid) ...[
             const SizedBox(height: 10),
             Text(
-              '提示：Android 建议选择一个公共文件夹（如 Download/OctoFetch）。'
+              '提示：Android 建议选择一个公共文件夹（如 Download/InkFetch）。'
               '未选择时文件保存在应用专属目录，卸载应用会一并删除。',
               style: TextStyle(fontSize: 11.5, color: muted, height: 1.5),
             ),
@@ -186,7 +189,8 @@ class SettingsPage extends StatelessWidget {
               style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
             ),
             subtitle: Text(
-              '每次测试全部镜像；开启后每个源读取 1MB 样本，速度排序更准确但更耗流量',
+              '优先测试常用镜像，可用分片源不足时自动扩展到长尾与实验源；'
+              '开启后每个源读取 1MB 样本，排序更准但更耗流量',
               style: TextStyle(fontSize: 11.5, color: muted),
             ),
           ),
@@ -274,12 +278,21 @@ class SettingsPage extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'OctoFetch 1.0.0',
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w800,
-                      ),
+                    FutureBuilder<PackageInfo>(
+                      future: _packageInfo,
+                      builder: (context, snapshot) {
+                        final info = snapshot.data;
+                        final label = info == null
+                            ? 'InkFetch'
+                            : 'InkFetch ${info.version}';
+                        return Text(
+                          label,
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        );
+                      },
                     ),
                     const SizedBox(height: 2),
                     Text(
@@ -295,8 +308,9 @@ class SettingsPage extends StatelessWidget {
           Text(
             '内置 ${builtinMirrors.length} 个下载源：GitHub 官方、codeload、'
             'jsDelivr、GitMirror 以及 ${builtinMirrors.where((m) => m.kind == MirrorKind.prefix).length} '
-            '个加速代理。下载前会对目标文件发起 128KB（高精度 1MB）Range 实测，'
-            '校验首段内容一致性后，按实测速度分配连接并分片并发下载。',
+            '个加速代理。下载前先测试常用镜像，可用分片源不足时才扩展到长尾源；'
+            '每个源读取 128KB（高精度 1MB）Range 样本并校验首段内容一致性，'
+            '然后按实测速度分配连接、分片并发下载。',
             style: TextStyle(fontSize: 12, color: muted, height: 1.65),
           ),
           const SizedBox(height: 12),

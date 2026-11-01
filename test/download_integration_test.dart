@@ -1,15 +1,12 @@
-import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:octofetch/core/downloader.dart';
-import 'package:octofetch/core/models.dart';
-import 'package:octofetch/core/probe.dart';
-import 'package:octofetch/core/scheduler.dart';
-import 'package:octofetch/core/url_parser.dart';
+import 'package:inkfetch/core/downloader.dart';
+import 'package:inkfetch/core/models.dart';
+import 'package:inkfetch/core/scheduler.dart';
+import 'package:inkfetch/core/url_parser.dart';
 
 SourceProbe _probe(String id, String url, int size, {bool range = true}) {
   return SourceProbe(
@@ -114,7 +111,7 @@ void main() {
       probedMs: 10,
     );
 
-    final dir = await Directory.systemTemp.createTemp('octofetch_it_');
+    final dir = await Directory.systemTemp.createTemp('inkfetch_it_');
     final dest = '${dir.path}/big.bin';
     final snapshots = <DownloadSnapshot>[];
     final job = DownloadJob(
@@ -159,7 +156,7 @@ void main() {
       expectedSha256: null,
       probedMs: 10,
     );
-    final dir = await Directory.systemTemp.createTemp('octofetch_single_');
+    final dir = await Directory.systemTemp.createTemp('inkfetch_single_');
     final dest = '${dir.path}/single.bin';
     final job = DownloadJob(
       taskId: 'single',
@@ -197,7 +194,7 @@ void main() {
       expectedSha256: null,
       probedMs: 10,
     );
-    final dir = await Directory.systemTemp.createTemp('octofetch_bad_');
+    final dir = await Directory.systemTemp.createTemp('inkfetch_bad_');
     final dest = '${dir.path}/mix.bin';
     final job = DownloadJob(
       taskId: 'mix',
@@ -216,7 +213,7 @@ void main() {
   });
 
   test('响应体错误时能检测出不完整文件', () async {
-    final dir = await Directory.systemTemp.createTemp('octofetch_err_');
+    final dir = await Directory.systemTemp.createTemp('inkfetch_err_');
     final dest = '${dir.path}/missing.bin';
     final parsed = parseGitHubUrl(
       'https://raw.githubusercontent.com/owner/repo/main/big.bin',

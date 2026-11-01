@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "app.octofetch" "\0"
-            VALUE "FileDescription", "octofetch" "\0"
+            VALUE "CompanyName", "app.inkfetch" "\0"
+            VALUE "FileDescription", "inkfetch" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "octofetch" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 app.octofetch. All rights reserved." "\0"
-            VALUE "OriginalFilename", "octofetch.exe" "\0"
-            VALUE "ProductName", "octofetch" "\0"
+            VALUE "InternalName", "inkfetch" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 app.inkfetch. All rights reserved." "\0"
+            VALUE "OriginalFilename", "inkfetch.exe" "\0"
+            VALUE "ProductName", "inkfetch" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

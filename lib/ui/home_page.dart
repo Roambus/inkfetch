@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../core/format.dart';
-import '../../core/mirrors.dart';
-import '../../core/models.dart';
-import '../../state/app_controller.dart';
+import '../core/format.dart';
+import '../core/models.dart';
+import '../state/app_controller.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -163,7 +162,7 @@ class _HomePageState extends State<HomePage> {
                 children: [
                   Flexible(
                     child: Text(
-                      'OctoFetch',
+                      'InkFetch',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.headlineSmall
@@ -208,8 +207,8 @@ class _HomePageState extends State<HomePage> {
               const SizedBox(width: 6),
               Text(
                 compact
-                    ? '${builtinMirrors.length}'
-                    : '${builtinMirrors.length} 个镜像',
+                    ? '${c.enabledMirrorCount}'
+                    : '${c.enabledMirrorCount} 个镜像已启用',
                 style: const TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
