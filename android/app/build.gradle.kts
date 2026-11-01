@@ -18,7 +18,6 @@ if (hasReleaseKeystore) {
 android {
     namespace = "app.inkfetch.downloader"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
