@@ -15,10 +15,16 @@ class ProbeOptions {
   final Duration timeout;
   final int maxTotalConnections;
 
+  /// 默认探测样本从 128KB 提到 512KB。
+  ///
+  /// 128KB 在有延迟的镜像上几乎整个样本都处在 TCP 慢启动阶段，
+  /// 估出来的速度比真实吞吐低一个数量级，连接配权因此严重失真：
+  /// 明明能跑几 MB/s 的源只分到很少的连接，整体下载被拖慢。
+  /// 512KB 仍是一次很轻的请求，但足以越过慢启动。
   const ProbeOptions({
-    this.probeBytes = 128 * 1024,
+    this.probeBytes = 512 * 1024,
     this.concurrency = 48,
-    this.timeout = const Duration(seconds: 3),
+    this.timeout = const Duration(seconds: 6),
     this.maxTotalConnections = 32,
   });
 }
@@ -182,8 +188,19 @@ Future<SourceProbe> _probeOne(
         rangeConsistent &&
         body.length == expectedLen &&
         body.isNotEmpty;
-    final bodySeconds = math.max(0.001, bodyElapsed.inMilliseconds / 1000.0);
-    final speed = (body.length / bodySeconds).round();
+
+    // 速度估算要去掉 TCP 慢启动那一段：样本的前 1/3 主要花在
+    // 建连与拥塞窗口爬升上，把它算进平均速度会系统性低估真实带宽
+    // （实测中 128KB 样本估出 0.1 MB/s，实际能跑到 3~4 MB/s）。
+    // 这里用「已读字节 / 有效传输时间」估算中后段的稳态速度。
+    final bodyMs = math.max(1, bodyElapsed.inMilliseconds);
+    final tailBudget = limit ~/ 3;
+    final tailBytes = math.max(0, body.length - tailBudget);
+    final warmupMs = bodyMs * tailBudget ~/ math.max(1, body.length);
+    final steadyMs = math.max(1, bodyMs - warmupMs);
+    final speed = tailBytes > 0
+        ? (tailBytes * 1000 / steadyMs).round()
+        : (body.length * 1000 / bodyMs).round();
     final latencyPenalty = math.min(0.5, (ttfb.inMilliseconds / 1000.0) * 0.35);
     final rangeFactor = supportsRange ? 1.0 : 0.42;
     final score = speed * (1 - latencyPenalty) * rangeFactor;

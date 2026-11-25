@@ -339,12 +339,17 @@ class DownloadJob {
 
     var pass = 0;
     while (pass < 4 && _queue.isNotEmpty && !_abort) {
-      // 每轮重新启用被限流的镜像，并按本轮实测速度重新分配连接数，
-      // 避免一次失败就永久丢弃某个源。
-      for (final index in alive) {
-        _progressByIndex[index]?.disabled = false;
+      // 每轮重新启用所有源，并按本轮实测速度重新分配连接数。
+      //
+      // 注意这里必须遍历「全部源」而不是 alive：上一轮被停用的源已经从
+      // alive 里移除了，只重置 alive 会让它们永远停在“已停用”状态——
+      // 界面上一片灰色但下载还在跑，正是这个原因。
+      for (var index = 0; index < _sites.length; index++) {
+        final progress = _progressByIndex[index];
+        if (progress != null) progress.disabled = false;
       }
       _passErrors.clear();
+      alive.addAll([for (var i = 0; i < _sites.length; i++) i]);
       final workerSites = _planPassWorkers(alive);
       if (workerSites.isEmpty) break;
       final workerCount = workerSites.length;

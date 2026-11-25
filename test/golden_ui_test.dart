@@ -64,10 +64,7 @@ Future<void> _loadFonts() async {
   icons.addFont(Future.value(ByteData.view(iconBytes.buffer)));
   await icons.load();
 
-  // 应用自己打包的字体：标题宋体与数字等宽。
-  await _loadBundledFont('Source Han Serif SC', [
-    'assets/fonts/InkSerif-Bold.ttf',
-  ]);
+  // 应用自己打包的等宽字体（中文由上面加载的 CJK 字体回退）。
   await _loadBundledFont('Cascadia Mono', ['assets/fonts/InkMono-Regular.ttf']);
 }
 
@@ -355,4 +352,5 @@ void main() {
     await _golden(tester, 'settings_tablet');
   });
 }
+
 

@@ -177,9 +177,7 @@ class SealMark extends StatelessWidget {
       child: Text(
         '墨',
         style: TextStyle(
-          fontFamily: kSerif,
-          fontFamilyFallback: kSerifFallback,
-          fontSize: size * 0.62,
+          fontSize: size * 0.6,
           height: 1,
           fontWeight: FontWeight.w700,
           color: const Color(0xFFF7F2E9),
@@ -408,6 +406,17 @@ class EmptyState extends StatelessWidget {
   }
 }
 
+/// 探测行右侧「单流 / 速度」的文字样式。
+///
+/// 「单流」是中文，等宽字体不含中文字形，套上去会变成方块；
+/// 速度是纯数字，用等宽才能对齐。分开写清楚，别在三元里混。
+TextStyle _probeValueStyle(ProbeStatus status, AppPalette palette) {
+  if (status == ProbeStatus.noRange) {
+    return TextStyle(fontSize: 11.5, color: palette.warning);
+  }
+  return dataStyle(size: 11.5, color: palette.ink, letterSpacing: 0);
+}
+
 /// 镜像探测结果行：名称、类型、延迟、速度。
 class SourceProbeRow extends StatelessWidget {
   final SourceProbe probe;
@@ -483,13 +492,9 @@ class SourceProbeRow extends StatelessWidget {
                 textAlign: TextAlign.right,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: dataStyle(
-                  size: 11.5,
-                  color: probe.status == ProbeStatus.noRange
-                      ? palette.warning
-                      : palette.ink,
-                  letterSpacing: 0,
-                ),
+                // 「单流」是中文（等宽字体没有中文字形，会变方块），
+                // 速度是纯数字，才用等宽。
+                style: _probeValueStyle(probe.status, palette),
               ),
             ),
           ],

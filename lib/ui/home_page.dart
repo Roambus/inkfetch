@@ -453,7 +453,7 @@ class _HomePageState extends State<HomePage> {
       children: [
         Text(
           '试试这些',
-          style: serifStyle(
+          style: displayStyle(
             size: 15,
             weight: FontWeight.w600,
             color: palette.muted,
@@ -511,7 +511,7 @@ class _HowItWorks extends StatelessWidget {
                 width: 52,
                 child: Text(
                   steps[i].$1,
-                  style: serifStyle(
+                  style: displayStyle(
                     size: 12.5,
                     weight: FontWeight.w600,
                     color: palette.faint,
@@ -615,5 +615,7 @@ class _MirrorCount extends StatelessWidget {
     );
   }
 }
+
+
 
 

@@ -135,10 +135,11 @@ class _SideBar extends StatelessWidget {
                     children: [
                       Text(
                         '墨取',
-                        style: serifStyle(
-                          size: 19,
+                        style: displayStyle(
+                          size: 18,
+                          weight: FontWeight.w700,
                           color: palette.ink,
-                          letterSpacing: 3,
+                          letterSpacing: 2,
                         ),
                       ),
                       const SizedBox(height: 2),

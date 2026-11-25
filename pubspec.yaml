@@ -62,18 +62,14 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
-  # 宋体标题字体：思源宋体 700 子集，只含界面用字与常用中文（约 1.5 MB）。
-  # 标题用宋体是这套界面的语气来源，不依赖系统装了什么字体。
   fonts:
-    - family: Source Han Serif SC
-      fonts:
-        - asset: assets/fonts/InkSerif-Bold.ttf
-          weight: 700
     # 等宽字体：所有数字与路径走它，速度跳动时整行不抖。
     - family: Cascadia Mono
       fonts:
         - asset: assets/fonts/InkMono-Regular.ttf
           weight: 400
+
+
 
 
 

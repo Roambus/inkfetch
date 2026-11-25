@@ -3,35 +3,33 @@ import 'package:flutter/material.dart';
 /// ─────────────────────────────────────────────────────────────
 /// 墨取的设计基调：宣纸 + 墨。
 ///
-/// 三种字音，各司其职：
-///   宋体（kSerif）— 页面标题与品牌，语气所在；
-///   无衬线（kSans）— 正文与控件，负责可读；
-///   等宽（kMono）  — 一切数字与路径，像仪表盘刻度。
+/// 只用一种字音：系统无衬线（中文走系统黑体，拉丁走系统 UI 字体），
+/// 靠字重与字号建立层次，而不是靠换字体。
+///
+/// 之前试过「标题用宋体、正文用黑体」，结果同一个界面上两种中文字体
+/// 混排，按钮与标题风格割裂，看起来又乱又土。中文字体一旦换，整套
+/// 界面的语气就断了，所以这里收回成单一字体：
+///   - 标题：同族、更重、字距收紧
+///   - 正文：同族、常规字重
+///   - 数字：等宽，只为对齐，不为风格
 ///
 /// 颜色只用两族：墨（中性，从纸白到墨黑）与一点朱砂、一点松烟绿。
-/// 绿只出现在「正在发生」与主要动作上，其余一律交给墨的深浅。
 /// ─────────────────────────────────────────────────────────────
 
-const String kSerif = 'Source Han Serif SC';
-const List<String> kSerifFallback = [
-  'Noto Serif SC',
-  'Noto Serif CJK SC',
-  'Songti SC',
-  'STSong',
-  'SimSun',
-  'serif',
-];
-
+/// 等宽字体，只用于需要纵向对齐的数字与路径。
 const String kMono = 'Cascadia Mono';
+
+/// 关键：等宽字体不含中日韩字形。一旦有人把中文也套上 kMono，
+/// 那些字就会变成方块（「64 分片 · 4 个源」这行曾经整句是豆腐块）。
+/// 所以回退链里必须放一个中文字体，让中文自动落到它上面。
 const List<String> kMonoFallback = [
-  // 等宽字体只含拉丁字符，中英文混排时中文回退到正文无衬线，避免出现豆腐块。
   'Microsoft YaHei UI',
   'Microsoft YaHei',
   'Noto Sans SC',
   'PingFang SC',
-  'Roboto',
   'Segoe UI',
-  'sans-serif',
+  'Consolas',
+  'monospace',
 ];
 
 /// 朱砂：只用于失败与危险，不做装饰。
@@ -53,6 +51,7 @@ const List<Color> kSitePalette = [
 Color siteColor(int siteIndex) =>
     kSitePalette[siteIndex.clamp(0, kSitePalette.length - 1).toInt()];
 
+
 /// 数字统一走等宽 + 等宽数字，避免速度跳动时整行抖动。
 TextStyle dataStyle({
   double size = 13,
@@ -72,17 +71,16 @@ TextStyle dataStyle({
   );
 }
 
-/// 宋体，用于标题与品牌。
-TextStyle serifStyle({
-  double size = 34,
-  FontWeight weight = FontWeight.w600,
+/// 大标题用：同族字体、更重的字重、收紧的字距。
+/// 不再换字体，只用字重和字距做层次。
+TextStyle displayStyle({
+  double size = 30,
+  FontWeight weight = FontWeight.w700,
   Color? color,
-  double letterSpacing = 0.5,
-  double height = 1.18,
+  double letterSpacing = -0.6,
+  double height = 1.2,
 }) {
   return TextStyle(
-    fontFamily: kSerif,
-    fontFamilyFallback: kSerifFallback,
     fontSize: size,
     fontWeight: weight,
     letterSpacing: letterSpacing,
@@ -164,13 +162,13 @@ ThemeData buildAppTheme(Brightness brightness) {
 
   return base.copyWith(
     textTheme: text.copyWith(
-      // 页面标题：宋体，是整套界面的语气。
-      displaySmall: serifStyle(size: 34, color: palette.ink),
-      headlineMedium: serifStyle(size: 25, color: palette.ink),
-      headlineSmall: serifStyle(
-        size: 20,
+      // 页面标题：同族字体，加粗 + 收紧字距，不再换字体。
+      displaySmall: displayStyle(size: 30, color: palette.ink),
+      headlineMedium: displayStyle(size: 23, color: palette.ink),
+      headlineSmall: displayStyle(
+        size: 19,
         weight: FontWeight.w600,
-        letterSpacing: 0.2,
+        letterSpacing: -0.2,
         color: palette.ink,
       ),
       // 文件名这类「有身份的内容」用无衬线加重。
@@ -347,10 +345,11 @@ ThemeData buildAppTheme(Brightness brightness) {
         borderRadius: BorderRadius.circular(14),
         side: BorderSide(color: palette.border),
       ),
-      titleTextStyle: serifStyle(
-        size: 19,
+      titleTextStyle: displayStyle(
+        size: 17,
+        weight: FontWeight.w600,
         color: palette.ink,
-        letterSpacing: 0.3,
+        letterSpacing: -0.2,
       ),
       contentTextStyle: TextStyle(
         fontSize: 13,

@@ -110,10 +110,9 @@ class DownloadPage extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              fontFamily: kMono,
-              fontFamilyFallback: kMonoFallback,
               fontSize: 10.5,
               color: palette.faint,
+              fontFeatures: const [FontFeature.tabularFigures()],
             ),
           ),
           const SizedBox(height: 22),
@@ -129,11 +128,9 @@ class DownloadPage extends StatelessWidget {
                   Text(
                     (percent * 100).toStringAsFixed(1),
                     style: TextStyle(
-                      fontFamily: kSerif,
-                      fontFamilyFallback: kSerifFallback,
-                      fontSize: compact ? 46 : 54,
+                      fontSize: compact ? 44 : 52,
                       fontWeight: FontWeight.w700,
-                      letterSpacing: -1,
+                      letterSpacing: -1.8,
                       height: 0.95,
                       color: failed ? palette.danger : palette.ink,
                       fontFeatures: const [FontFeature.tabularFigures()],
@@ -232,6 +229,7 @@ class DownloadPage extends StatelessWidget {
             Meter(value: null, height: 52),
           const SizedBox(height: 11),
           // 字节数与分片数在窄屏会挤，用 Wrap 让它们自然换行。
+          // 这两行含中文，不能用等宽字体（等宽字体没有中文字形，会出方块）。
           Wrap(
             alignment: WrapAlignment.spaceBetween,
             spacing: 12,
@@ -240,22 +238,20 @@ class DownloadPage extends StatelessWidget {
               Text(
                 '${humanBytes(snapshot.downloaded)} / '
                 '${snapshot.total > 0 ? humanBytes(snapshot.total) : '未知大小'}',
-                style: dataStyle(
-                  size: 11,
-                  weight: FontWeight.w400,
+                style: TextStyle(
+                  fontSize: 11,
                   color: palette.muted,
-                  letterSpacing: 0,
+                  fontFeatures: const [FontFeature.tabularFigures()],
                 ),
               ),
               Text(
                 verifying
                     ? '正在校验 SHA-256…'
                     : '${snapshot.chunkMap.length} 分片 · ${snapshot.sites.length} 个源',
-                style: dataStyle(
-                  size: 11,
-                  weight: FontWeight.w400,
+                style: TextStyle(
+                  fontSize: 11,
                   color: verifying ? palette.accent : palette.faint,
-                  letterSpacing: 0,
+                  fontFeatures: const [FontFeature.tabularFigures()],
                 ),
               ),
             ],
@@ -581,11 +577,10 @@ class DownloadPage extends StatelessWidget {
                           '${task.completedChunks}/${task.chunkCount} 分片',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: dataStyle(
-                            size: 10.5,
-                            weight: FontWeight.w400,
+                          style: TextStyle(
+                            fontSize: 10.5,
                             color: palette.faint,
-                            letterSpacing: 0,
+                            fontFeatures: const [FontFeature.tabularFigures()],
                           ),
                         ),
                       ),
