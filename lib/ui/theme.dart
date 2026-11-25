@@ -1,215 +1,399 @@
 import 'package:flutter/material.dart';
 
-const Color kAccent = Color(0xFF5B8CFF);
-const Color kAccentAlt = Color(0xFF37D6C0);
-const Color kWarning = Color(0xFFFFB648);
-const Color kDanger = Color(0xFFFF6B81);
+/// ─────────────────────────────────────────────────────────────
+/// 墨取的设计基调：宣纸 + 墨。
+///
+/// 三种字音，各司其职：
+///   宋体（kSerif）— 页面标题与品牌，语气所在；
+///   无衬线（kSans）— 正文与控件，负责可读；
+///   等宽（kMono）  — 一切数字与路径，像仪表盘刻度。
+///
+/// 颜色只用两族：墨（中性，从纸白到墨黑）与一点朱砂、一点松烟绿。
+/// 绿只出现在「正在发生」与主要动作上，其余一律交给墨的深浅。
+/// ─────────────────────────────────────────────────────────────
 
+const String kSerif = 'Source Han Serif SC';
+const List<String> kSerifFallback = [
+  'Noto Serif SC',
+  'Noto Serif CJK SC',
+  'Songti SC',
+  'STSong',
+  'SimSun',
+  'serif',
+];
+
+const String kMono = 'Cascadia Mono';
+const List<String> kMonoFallback = [
+  // 等宽字体只含拉丁字符，中英文混排时中文回退到正文无衬线，避免出现豆腐块。
+  'Microsoft YaHei UI',
+  'Microsoft YaHei',
+  'Noto Sans SC',
+  'PingFang SC',
+  'Roboto',
+  'Segoe UI',
+  'sans-serif',
+];
+
+/// 朱砂：只用于失败与危险，不做装饰。
+const Color kCinnabar = Color(0xFFB23A2C);
+
+/// 松烟：主要动作与「正在下载」。
+const Color kPine = Color(0xFF1C5B4A);
+
+/// 分片热力图配色：像不同成色的墨，低饱和、彼此可辨。
 const List<Color> kSitePalette = [
-  Color(0xFF5B8CFF),
-  Color(0xFF37D6C0),
-  Color(0xFFFFB648),
-  Color(0xFFB388FF),
-  Color(0xFFFF6B81),
-  Color(0xFF4DD0E1),
-  Color(0xFFA3E635),
-  Color(0xFFF472B6),
+  Color(0xFF1C5B4A),
+  Color(0xFF3F6E62),
+  Color(0xFF6E7F5A),
+  Color(0xFF8A6A46),
+  Color(0xFF5B6280),
+  Color(0xFF7C5560),
 ];
 
 Color siteColor(int siteIndex) =>
     kSitePalette[siteIndex.clamp(0, kSitePalette.length - 1).toInt()];
 
+/// 数字统一走等宽 + 等宽数字，避免速度跳动时整行抖动。
+TextStyle dataStyle({
+  double size = 13,
+  FontWeight weight = FontWeight.w600,
+  Color? color,
+  double letterSpacing = -0.2,
+}) {
+  return TextStyle(
+    fontFamily: kMono,
+    fontFamilyFallback: kMonoFallback,
+    fontSize: size,
+    fontWeight: weight,
+    letterSpacing: letterSpacing,
+    color: color,
+    fontFeatures: const [FontFeature.tabularFigures()],
+    height: 1.15,
+  );
+}
+
+/// 宋体，用于标题与品牌。
+TextStyle serifStyle({
+  double size = 34,
+  FontWeight weight = FontWeight.w600,
+  Color? color,
+  double letterSpacing = 0.5,
+  double height = 1.18,
+}) {
+  return TextStyle(
+    fontFamily: kSerif,
+    fontFamilyFallback: kSerifFallback,
+    fontSize: size,
+    fontWeight: weight,
+    letterSpacing: letterSpacing,
+    color: color,
+    height: height,
+  );
+}
+
+/// 一套克制的明暗色板，页面统一从这里取色。
+class AppPalette {
+  final bool dark;
+  const AppPalette({required this.dark});
+
+  static AppPalette of(BuildContext context) =>
+      AppPalette(dark: Theme.of(context).brightness == Brightness.dark);
+
+  /// 纸：浅色是带一点青灰的宣纸，深色是墨池。
+  Color get background =>
+      dark ? const Color(0xFF0C0E10) : const Color(0xFFF0F1EC);
+  /// 承墨的案面。
+  Color get surface =>
+      dark ? const Color(0xFF14171A) : const Color(0xFFFBFBF8);
+  /// 凹下去的浅槽。
+  Color get surfaceAlt =>
+      dark ? const Color(0xFF1C2024) : const Color(0xFFE9EBE4);
+  /// 发丝线。
+  Color get border =>
+      dark ? const Color(0xFF262B30) : const Color(0xFFD9DCD2);
+  Color get borderStrong =>
+      dark ? const Color(0xFF3A4046) : const Color(0xFFC2C7BB);
+  /// 正文墨色。
+  Color get ink => dark ? const Color(0xFFE9E6DE) : const Color(0xFF14171A);
+  Color get muted =>
+      dark ? const Color(0xFF9AA098) : const Color(0xFF5C6159);
+  Color get faint =>
+      dark ? const Color(0xFF6B7169) : const Color(0xFF92978C);
+  /// 松烟绿：正在发生。
+  Color get accent => dark ? const Color(0xFF74AF9B) : kPine;
+  Color get positive => dark ? const Color(0xFF74AF9B) : const Color(0xFF236653);
+  Color get danger => dark ? const Color(0xFFD2695A) : kCinnabar;
+  Color get warning => dark ? const Color(0xFFC7A063) : const Color(0xFF8E6425);
+
+  /// 主要按钮填充色。
+  Color get primaryFill => accent;
+  Color get onPrimaryFill => dark ? const Color(0xFF07120E) : const Color(0xFFF7FAF6);
+}
+
 ThemeData buildAppTheme(Brightness brightness) {
-  final dark = brightness == Brightness.dark;
-  final scheme =
-      ColorScheme.fromSeed(seedColor: kAccent, brightness: brightness).copyWith(
-        primary: dark ? kAccent : const Color(0xFF3355CC),
-        secondary: kAccentAlt,
-        error: kDanger,
-        surface: dark ? const Color(0xFF0E1828) : Colors.white,
-        onSurface: dark ? const Color(0xFFE7EEFA) : const Color(0xFF111B2E),
-        surfaceContainerHighest: dark
-            ? const Color(0xFF16233A)
-            : const Color(0xFFEAF0FA),
-      );
+  final palette = AppPalette(dark: brightness == Brightness.dark);
+
+  final scheme = ColorScheme(
+    brightness: brightness,
+    primary: palette.primaryFill,
+    onPrimary: palette.onPrimaryFill,
+    secondary: palette.accent,
+    onSecondary: palette.onPrimaryFill,
+    error: palette.danger,
+    onError: Colors.white,
+    surface: palette.surface,
+    onSurface: palette.ink,
+    surfaceContainerHighest: palette.surfaceAlt,
+    outline: palette.border,
+    outlineVariant: palette.border,
+  );
 
   final base = ThemeData(
     useMaterial3: true,
     brightness: brightness,
     colorScheme: scheme,
-    scaffoldBackgroundColor: Colors.transparent,
+    scaffoldBackgroundColor: palette.background,
     splashFactory: InkSparkle.splashFactory,
+    visualDensity: VisualDensity.standard,
   );
 
-  final textTheme = base.textTheme.copyWith(
-    headlineMedium: base.textTheme.headlineMedium?.copyWith(
-      fontWeight: FontWeight.w700,
-      letterSpacing: -0.6,
-    ),
-    headlineSmall: base.textTheme.headlineSmall?.copyWith(
-      fontWeight: FontWeight.w700,
-      letterSpacing: -0.4,
-    ),
-    titleLarge: base.textTheme.titleLarge?.copyWith(
-      fontWeight: FontWeight.w700,
-      letterSpacing: -0.3,
-    ),
-    titleMedium: base.textTheme.titleMedium?.copyWith(
-      fontWeight: FontWeight.w600,
-    ),
-    bodyMedium: base.textTheme.bodyMedium?.copyWith(height: 1.5),
-    labelLarge: base.textTheme.labelLarge?.copyWith(
-      fontWeight: FontWeight.w600,
-      letterSpacing: 0.1,
-    ),
+  final text = base.textTheme.apply(
+    bodyColor: palette.ink,
+    displayColor: palette.ink,
   );
 
   return base.copyWith(
-    textTheme: textTheme,
+    textTheme: text.copyWith(
+      // 页面标题：宋体，是整套界面的语气。
+      displaySmall: serifStyle(size: 34, color: palette.ink),
+      headlineMedium: serifStyle(size: 25, color: palette.ink),
+      headlineSmall: serifStyle(
+        size: 20,
+        weight: FontWeight.w600,
+        letterSpacing: 0.2,
+        color: palette.ink,
+      ),
+      // 文件名这类「有身份的内容」用无衬线加重。
+      titleLarge: text.titleLarge?.copyWith(
+        fontSize: 17,
+        fontWeight: FontWeight.w600,
+        letterSpacing: -0.1,
+        height: 1.35,
+      ),
+      titleMedium: text.titleMedium?.copyWith(
+        fontSize: 13.5,
+        fontWeight: FontWeight.w600,
+        letterSpacing: 0.1,
+        height: 1.4,
+      ),
+      titleSmall: text.titleSmall?.copyWith(
+        fontSize: 12.5,
+        fontWeight: FontWeight.w600,
+      ),
+      bodyLarge: text.bodyLarge?.copyWith(fontSize: 14, height: 1.65),
+      bodyMedium: text.bodyMedium?.copyWith(fontSize: 13, height: 1.65),
+      bodySmall: text.bodySmall?.copyWith(fontSize: 12, height: 1.6),
+      labelLarge: text.labelLarge?.copyWith(
+        fontSize: 13,
+        fontWeight: FontWeight.w600,
+        letterSpacing: 0.2,
+      ),
+      labelSmall: text.labelSmall?.copyWith(
+        fontSize: 10,
+        fontWeight: FontWeight.w600,
+        letterSpacing: 1.1,
+      ),
+    ),
+    canvasColor: palette.background,
     appBarTheme: const AppBarTheme(
       backgroundColor: Colors.transparent,
+      surfaceTintColor: Colors.transparent,
       elevation: 0,
       scrolledUnderElevation: 0,
     ),
+    // 面板：只有一个层级的容器，圆角与描边克制。
     cardTheme: CardThemeData(
       elevation: 0,
-      color: dark ? const Color(0xFF101C2E) : Colors.white,
+      color: palette.surface,
+      surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
-        side: BorderSide(
-          color: dark ? const Color(0xFF223250) : const Color(0xFFE3EAF5),
-        ),
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(color: palette.border),
       ),
+      margin: EdgeInsets.zero,
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: dark ? const Color(0xFF0B1422) : const Color(0xFFF3F6FC),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: BorderSide(
-          color: dark ? const Color(0xFF24344F) : const Color(0xFFDCE5F2),
-        ),
+      fillColor: Colors.transparent,
+      hintStyle: TextStyle(
+        fontSize: 13.5,
+        color: palette.faint,
+        fontWeight: FontWeight.w400,
       ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: BorderSide(
-          color: dark ? const Color(0xFF24344F) : const Color(0xFFDCE5F2),
-        ),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: kAccent, width: 1.4),
-      ),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      border: InputBorder.none,
+      enabledBorder: InputBorder.none,
+      focusedBorder: InputBorder.none,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 2, vertical: 6),
     ),
+    // 主要动作：墨绿实底，不用通栏黑条。
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
-        minimumSize: const Size(0, 50),
+        backgroundColor: palette.primaryFill,
+        foregroundColor: palette.onPrimaryFill,
+        minimumSize: const Size(0, 40),
         padding: const EdgeInsets.symmetric(horizontal: 22),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        textStyle: const TextStyle(
+          fontSize: 13.5,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.3,
+        ),
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
-        minimumSize: const Size(0, 50),
+        minimumSize: const Size(0, 40),
         padding: const EdgeInsets.symmetric(horizontal: 18),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        side: BorderSide(
-          color: dark ? const Color(0xFF2C405F) : const Color(0xFFD5DFEF),
-        ),
-        textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+        foregroundColor: palette.ink,
+        backgroundColor: palette.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        side: BorderSide(color: palette.borderStrong),
+        textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+      ),
+    ),
+    textButtonTheme: TextButtonThemeData(
+      style: TextButton.styleFrom(
+        foregroundColor: palette.muted,
+        minimumSize: const Size(0, 34),
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+        textStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w500),
       ),
     ),
     iconButtonTheme: IconButtonThemeData(
       style: IconButton.styleFrom(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        foregroundColor: palette.muted,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
       ),
     ),
     dividerTheme: DividerThemeData(
-      color: dark ? const Color(0xFF1D2B43) : const Color(0xFFE8EEF8),
+      color: palette.border,
       thickness: 1,
+      space: 1,
+    ),
+    sliderTheme: SliderThemeData(
+      trackHeight: 3,
+      activeTrackColor: palette.accent,
+      inactiveTrackColor: palette.surfaceAlt,
+      thumbColor: palette.accent,
+      showValueIndicator: ShowValueIndicator.never,
+      overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+    ),
+    switchTheme: SwitchThemeData(
+      trackColor: WidgetStateProperty.resolveWith((states) {
+        if (states.contains(WidgetState.selected)) {
+          return palette.accent.withValues(alpha: 0.9);
+        }
+        return palette.surfaceAlt;
+      }),
+      thumbColor: WidgetStateProperty.resolveWith((states) {
+        if (states.contains(WidgetState.selected)) {
+          return palette.dark ? const Color(0xFF0C0E10) : Colors.white;
+        }
+        return palette.dark ? const Color(0xFF4A5158) : Colors.white;
+      }),
+      trackOutlineColor: WidgetStatePropertyAll(palette.border),
     ),
     navigationBarTheme: NavigationBarThemeData(
-      backgroundColor: dark ? const Color(0xFF0A1220) : Colors.white,
+      backgroundColor: palette.surface,
+      surfaceTintColor: Colors.transparent,
       elevation: 0,
-      height: 68,
-      indicatorColor: kAccent.withValues(alpha: dark ? 0.18 : 0.12),
-      labelTextStyle: WidgetStatePropertyAll(
-        TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          color: dark ? const Color(0xFFB9C8E0) : const Color(0xFF4A5A75),
-        ),
-      ),
+      height: 58,
+      indicatorColor: Colors.transparent,
+      labelTextStyle: WidgetStateProperty.resolveWith((states) {
+        final selected = states.contains(WidgetState.selected);
+        return TextStyle(
+          fontSize: 11,
+          fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+          letterSpacing: 0.4,
+          color: selected ? palette.ink : palette.faint,
+        );
+      }),
+      iconTheme: WidgetStateProperty.resolveWith((states) {
+        final selected = states.contains(WidgetState.selected);
+        return IconThemeData(
+          size: 19,
+          color: selected ? palette.accent : palette.faint,
+        );
+      }),
     ),
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
-      backgroundColor: dark ? const Color(0xFF1B2942) : const Color(0xFF1E2A44),
-      contentTextStyle: const TextStyle(color: Colors.white),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      backgroundColor: palette.dark
+          ? const Color(0xFF23272C)
+          : const Color(0xFF1A1D1B),
+      contentTextStyle: const TextStyle(
+        color: Color(0xFFEDEAE3),
+        fontSize: 12.5,
+      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      insetPadding: const EdgeInsets.all(16),
+    ),
+    dialogTheme: DialogThemeData(
+      backgroundColor: palette.surface,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(color: palette.border),
+      ),
+      titleTextStyle: serifStyle(
+        size: 19,
+        color: palette.ink,
+        letterSpacing: 0.3,
+      ),
+      contentTextStyle: TextStyle(
+        fontSize: 13,
+        height: 1.7,
+        color: palette.muted,
+      ),
+    ),
+    bottomSheetTheme: BottomSheetThemeData(
+      backgroundColor: palette.surface,
+      surfaceTintColor: Colors.transparent,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+    ),
+    popupMenuTheme: PopupMenuThemeData(
+      color: palette.surface,
+      surfaceTintColor: Colors.transparent,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: palette.border),
+      ),
+      textStyle: TextStyle(fontSize: 12.5, color: palette.ink),
+    ),
+    tooltipTheme: TooltipThemeData(
+      decoration: BoxDecoration(
+        color: palette.dark ? const Color(0xFF2A2F34) : const Color(0xFF1A1D1B),
+        borderRadius: BorderRadius.circular(5),
+      ),
+      textStyle: const TextStyle(fontSize: 11.5, color: Color(0xFFEDEAE3)),
+      waitDuration: const Duration(milliseconds: 500),
     ),
   );
 }
 
+/// 纯色画布。界面不靠渐变与光晕取悦，靠排布与留白。
 class AppBackground extends StatelessWidget {
   final Widget child;
   const AppBackground({super.key, required this.child});
 
   @override
   Widget build(BuildContext context) {
-    final dark = Theme.of(context).brightness == Brightness.dark;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: dark
-              ? const [Color(0xFF070B14), Color(0xFF0B1424), Color(0xFF0A101C)]
-              : const [Color(0xFFF6F9FF), Color(0xFFEDF3FE), Color(0xFFF7FAFF)],
-        ),
-      ),
-      child: Stack(
-        children: [
-          Positioned(
-            top: -160,
-            right: -120,
-            child: _Glow(
-              color: kAccent.withValues(alpha: dark ? 0.22 : 0.16),
-              size: 380,
-            ),
-          ),
-          Positioned(
-            bottom: 120,
-            left: -160,
-            child: _Glow(
-              color: kAccentAlt.withValues(alpha: dark ? 0.14 : 0.12),
-              size: 420,
-            ),
-          ),
-          child,
-        ],
-      ),
-    );
-  }
-}
-
-class _Glow extends StatelessWidget {
-  final Color color;
-  final double size;
-  const _Glow({required this.color, required this.size});
-
-  @override
-  Widget build(BuildContext context) {
-    return IgnorePointer(
-      child: Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: RadialGradient(colors: [color, color.withValues(alpha: 0)]),
-        ),
-      ),
-    );
+    final palette = AppPalette.of(context);
+    return ColoredBox(color: palette.background, child: child);
   }
 }

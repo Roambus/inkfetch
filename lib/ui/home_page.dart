@@ -25,13 +25,25 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _text.text = c.urlInput;
+    c.addListener(_syncInput);
   }
 
   @override
   void dispose() {
+    c.removeListener(_syncInput);
     _text.dispose();
     _focus.dispose();
     super.dispose();
+  }
+
+  /// 从队列或未完成任务恢复时，输入框需要跟随控制器。
+  void _syncInput() {
+    if (_focus.hasFocus) return;
+    if (_text.text == c.urlInput) return;
+    _text.value = TextEditingValue(
+      text: c.urlInput,
+      selection: TextSelection.collapsed(offset: c.urlInput.length),
+    );
   }
 
   void _fill(String url) {
@@ -69,36 +81,28 @@ class _HomePageState extends State<HomePage> {
     if (report == null) return;
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: Theme.of(context).colorScheme.surface,
       showDragHandle: true,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
-      ),
       builder: (context) {
-        return DraggableScrollableSheet(
-          expand: false,
-          initialChildSize: 0.7,
-          maxChildSize: 0.92,
-          minChildSize: 0.4,
-          builder: (context, scrollController) {
-            return ListView(
-              controller: scrollController,
-              padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
-              children: [
-                SectionHeader(
-                  title: '全部镜像测试结果',
-                  subtitle:
-                      '共测试 ${report.testedCount} 个源，'
-                      '${report.usableCount} 个可用，'
-                      '${report.rangeCount} 个支持分片',
-                ),
-                const SizedBox(height: 8),
-                for (var i = 0; i < report.sources.length; i++)
-                  SourceProbeRow(probe: report.sources[i], index: i),
+        return ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(context).height * 0.78,
+          ),
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 28),
+            children: [
+              SectionHeader(
+                title: '全部镜像结果',
+                subtitle:
+                    '测试 ${report.testedCount} 个源 · 可用 ${report.usableCount} 个 · '
+                    '支持分片 ${report.rangeCount} 个',
+              ),
+              const SizedBox(height: 10),
+              for (var i = 0; i < report.sources.length; i++) ...[
+                if (i > 0) Divider(height: 1),
+                SourceProbeRow(probe: report.sources[i], index: i),
               ],
-            );
-          },
+            ],
+          ),
         );
       },
     );
@@ -107,164 +111,173 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     final report = c.report;
-    return Column(
-      children: [
-        Expanded(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 960),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _buildHeader(context),
-                    const SizedBox(height: 18),
-                    if (c.probing) ...[
-                      _buildProbingCard(context),
-                      const SizedBox(height: 14),
-                    ],
-                    if (c.probeError != null) ...[
-                      _buildErrorCard(context),
-                      const SizedBox(height: 14),
-                    ],
-                    if (report != null) ...[
-                      _buildReportCard(context, report),
-                      const SizedBox(height: 14),
-                    ],
-                    const SizedBox(height: 6),
-                    _buildExamples(context),
-                    const SizedBox(height: 10),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-        _buildComposer(context),
-      ],
-    );
-  }
-
-  Widget _buildHeader(BuildContext context) {
-    final muted = Theme.of(context).colorScheme.onSurface
-        .withValues(alpha: 0.55);
-    final compact = MediaQuery.sizeOf(context).width < 560;
-    return Row(
-      children: [
-        const GradientBadge(size: 52),
-        const SizedBox(width: 14),
-        Expanded(
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(22, 26, 22, 40),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 880),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(
-                children: [
-                  Flexible(
-                    child: Text(
-                      'InkFetch',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.headlineSmall
-                          ?.copyWith(letterSpacing: -0.8),
-                    ),
-                  ),
-                  if (!compact) ...[
-                    const SizedBox(width: 9),
-                    const Pill(
-                      text: '原生 Flutter',
-                      color: kAccentAlt,
-                      icon: Icons.smartphone_rounded,
-                      dense: true,
-                    ),
-                  ],
-                ],
+              PageHead(
+                title: '下载',
+                subtitle: '多镜像并发拉取，慢源自动降权，断了可以接着下。',
+                trailing: _MirrorCount(count: c.enabledMirrorCount),
               ),
-              const SizedBox(height: 3),
-              Text(
-                compact ? '多源并发 · 跑满带宽' : '多镜像实测 · 多源分片并发 · 跑满带宽',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 12.5, color: muted),
-              ),
+              const SizedBox(height: 26),
+              _buildComposer(context),
+              if (c.probing) ...[
+                const SizedBox(height: 12),
+                _buildProbing(context),
+              ],
+              if (c.probeError != null) ...[
+                const SizedBox(height: 12),
+                _buildError(context),
+              ],
+              if (report != null) ...[
+                const SizedBox(height: 12),
+                _buildReport(context, report),
+              ],
+              const SizedBox(height: 30),
+              if (report == null) _buildExamples(context) else _buildExamples(context),
             ],
           ),
         ),
-        const SizedBox(width: 8),
-        Container(
-          padding: EdgeInsets.symmetric(
-            horizontal: compact ? 9 : 12,
-            vertical: 8,
-          ),
-          decoration: BoxDecoration(
-            color: kAccent.withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: kAccent.withValues(alpha: 0.25)),
-          ),
-          child: Row(
-            children: [
-              const Icon(Icons.hub_rounded, size: 16, color: kAccent),
-              const SizedBox(width: 6),
-              Text(
-                compact
-                    ? '${c.enabledMirrorCount}'
-                    : '${c.enabledMirrorCount} 个镜像已启用',
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: kAccent,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
+      ),
     );
   }
 
-  Widget _buildProbingCard(BuildContext context) {
+  /// 输入区不是一张「填表卡片」，而是一整条可写字的案面：
+  /// 上面是链接输入，下面一分为二——保存位置在左，动作在右。
+  Widget _buildComposer(BuildContext context) {
+    final palette = AppPalette.of(context);
+    final busy = c.busy;
+    final percent = c.snapshot != null && c.downloading
+        ? c.snapshot!.progress
+        : null;
     return AppCard(
-      child: Row(
+      padding: EdgeInsets.zero,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const SizedBox(
-            width: 22,
-            height: 22,
-            child: CircularProgressIndicator(strokeWidth: 2.4),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          // 链接输入：一整行，没有输入框边框，靠下划线分界。
+          Container(
+            padding: const EdgeInsets.fromLTRB(18, 6, 8, 6),
+            decoration: BoxDecoration(
+              border: Border(bottom: BorderSide(color: palette.border)),
+            ),
+            child: Row(
               children: [
-                Text('正在测试镜像', style: Theme.of(context).textTheme.titleSmall),
-                const SizedBox(height: 4),
-                Text(
-                  c.probeMessage.isEmpty ? '正在准备…' : c.probeMessage,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Theme.of(context).colorScheme.onSurface
-                        .withValues(alpha: 0.55),
+                Icon(Icons.link_rounded, size: 18, color: palette.faint),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextField(
+                    controller: _text,
+                    focusNode: _focus,
+                    onChanged: c.setUrl,
+                    onSubmitted: (_) => _download(),
+                    textInputAction: TextInputAction.go,
+                    maxLines: 1,
+                    style: TextStyle(fontSize: 13.5, color: palette.ink),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      hintText: '粘贴 GitHub 文件、Release、压缩包或 Gist 链接',
+                      prefixIcon: null,
+                    ),
                   ),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  tooltip: '粘贴剪贴板',
+                  onPressed: busy ? null : _paste,
+                  icon: const Icon(Icons.content_paste_rounded, size: 16),
                 ),
               ],
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildErrorCard(BuildContext context) {
-    return AppCard(
-      color: kDanger.withValues(alpha: 0.08),
-      child: Row(
-        children: [
-          const Icon(Icons.error_outline_rounded, color: kDanger),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              c.probeError!,
-              style: const TextStyle(fontSize: 13, height: 1.5),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 14, 18, 16),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                // 窄屏：动作独占一行；宽屏：保存位置在左、动作在右。
+                final compact = constraints.maxWidth < 520;
+                final actions = Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    OutlinedButton(
+                      onPressed: busy ? null : _test,
+                      child: const Text('测试镜像'),
+                    ),
+                    const SizedBox(width: 8),
+                    FilledButton(
+                      onPressed: busy ? null : _download,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          if (busy && percent != null) ...[
+                            SizedBox(
+                              width: 13,
+                              height: 13,
+                              child: CircularProgressIndicator(
+                                value: percent > 0 ? percent : null,
+                                strokeWidth: 2,
+                                color: palette.onPrimaryFill,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text('${(percent * 100).toStringAsFixed(0)}%'),
+                          ] else
+                            Text(busy ? '处理中' : '开始下载'),
+                        ],
+                      ),
+                    ),
+                  ],
+                );
+                final destination = Row(
+                  children: [
+                    Icon(Icons.folder_outlined, size: 15, color: palette.faint),
+                    const SizedBox(width: 9),
+                    Flexible(
+                      child: Text(
+                        c.destinationLabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 11.5, color: palette.muted),
+                      ),
+                    ),
+                    const SizedBox(width: 2),
+                    TextButton(
+                      onPressed: busy ? null : c.pickDownloadDirectory,
+                      style: TextButton.styleFrom(
+                        minimumSize: const Size(0, 28),
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                      ),
+                      child: const Text('更改'),
+                    ),
+                  ],
+                );
+                if (compact) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      destination,
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(child: actions),
+                        ],
+                      ),
+                    ],
+                  );
+                }
+                return Row(
+                  children: [
+                    Expanded(child: destination),
+                    const SizedBox(width: 12),
+                    actions,
+                  ],
+                );
+              },
             ),
           ),
         ],
@@ -272,70 +285,64 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildExamples(BuildContext context) {
-    final muted = Theme.of(context).colorScheme.onSurface
-        .withValues(alpha: 0.5);
-    final examples = [
-      'https://github.com/rust-lang/rust/blob/master/README.md',
-      'https://github.com/git/git/archive/refs/heads/master.zip',
-      'https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-1.7.1-amd64.deb',
-    ];
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(Icons.auto_awesome_rounded, size: 15, color: muted),
-            const SizedBox(width: 6),
-            Text(
-              '试试示例链接',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: muted,
-              ),
+  Widget _buildProbing(BuildContext context) {
+    final palette = AppPalette.of(context);
+    return AppCard(
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(
+              strokeWidth: 1.8,
+              color: palette.accent,
             ),
-          ],
-        ),
-        const SizedBox(height: 9),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final url in examples)
-              ActionChip(
-                label: Text(
-                  _shorten(url),
-                  style: const TextStyle(fontSize: 11.5),
-                ),
-                onPressed: () => _fill(url),
-                visualDensity: VisualDensity.compact,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  side: BorderSide(
-                    color: Theme.of(context).colorScheme.onSurface
-                        .withValues(alpha: 0.12),
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ],
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              c.probeMessage.isEmpty ? '正在测试镜像…' : c.probeMessage,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12, color: palette.muted),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
-  String _shorten(String url) {
-    if (url.length <= 62) return url;
-    return '${url.substring(0, 42)}…${url.substring(url.length - 16)}';
+  Widget _buildError(BuildContext context) {
+    final palette = AppPalette.of(context);
+    return AppCard(
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
+      color: palette.danger.withValues(alpha: 0.05),
+      child: Row(
+        children: [
+          Icon(Icons.error_outline_rounded, size: 16, color: palette.danger),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              c.probeError!,
+              style: TextStyle(
+                fontSize: 12,
+                color: palette.danger,
+                height: 1.55,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
-  Widget _buildReportCard(BuildContext context, ProbeReport report) {
-    final muted = Theme.of(context).colorScheme.onSurface
-        .withValues(alpha: 0.5);
+  Widget _buildReport(BuildContext context, ProbeReport report) {
+    final palette = AppPalette.of(context);
     final plan = report.plan;
     final top = report.sources.take(4).toList();
     return AppCard(
-      padding: const EdgeInsets.fromLTRB(18, 18, 18, 12),
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -350,100 +357,66 @@ class _HomePageState extends State<HomePage> {
                       report.parsed.filename,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleMedium,
+                      style: Theme.of(context).textTheme.titleLarge,
                     ),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 8),
                     Wrap(
-                      spacing: 6,
+                      spacing: 8,
                       runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        Pill(
-                          text: kindLabel(report.parsed.kind),
-                          color: kAccent,
-                          dense: true,
-                        ),
-                        Pill(
-                          text: '${report.testedCount} 个适配源已实测',
-                          color: kAccentAlt,
-                          icon: Icons.speed_rounded,
-                          dense: true,
-                        ),
-                        Pill(
-                          text: '${report.probedMs}ms',
-                          color: muted,
-                          icon: Icons.timer_outlined,
-                          dense: true,
-                        ),
+                        QuietTag(text: kindLabel(report.parsed.kind)),
                         if (report.expectedSha256 != null)
-                          const Pill(
-                            text: '官方 SHA',
-                            color: kAccentAlt,
-                            dense: true,
+                          const QuietTag(text: '官方 SHA'),
+                        Text(
+                          '已测试 ${report.testedCount} 个源 · ${report.probedMs}ms',
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            color: palette.faint,
                           ),
+                        ),
                       ],
                     ),
                   ],
                 ),
               ),
-              const SizedBox(width: 10),
               TextButton(
                 onPressed: c.busy ? null : _retest,
                 child: const Text('重新测试'),
               ),
             ],
           ),
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: kAccent.withValues(alpha: 0.07),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: kAccent.withValues(alpha: 0.18)),
-            ),
-            child: StatGrid(
-              items: [
-                StatBlock(
-                  label: '可用源',
-                  value: '${report.usableCount}',
-                  accent: kAccentAlt,
-                  icon: Icons.cloud_done_rounded,
-                ),
-                StatBlock(
-                  label: '分片源',
-                  value: '${report.rangeCount}',
-                  icon: Icons.call_split_rounded,
-                ),
-                StatBlock(
-                  label: '并发连接',
-                  value: '${plan.totalConnections}',
-                  accent: kAccent,
-                  icon: Icons.hub_rounded,
-                ),
-                StatBlock(
-                  label: '文件大小',
-                  value: report.totalSize == null
-                      ? '未知'
-                      : humanBytes(report.totalSize!),
-                  icon: Icons.straighten_rounded,
-                ),
-              ],
-            ),
+          const SizedBox(height: 20),
+          ReadingStrip(
+            items: [
+              Reading(label: '可用源', value: '${report.usableCount}'),
+              Reading(label: '分片源', value: '${report.rangeCount}'),
+              Reading(label: '并发连接', value: '${plan.totalConnections}'),
+              Reading(
+                label: '文件大小',
+                value: report.totalSize == null
+                    ? '未知'
+                    : humanBytes(report.totalSize!),
+              ),
+            ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
           Text(
             plan.reason,
-            style: TextStyle(fontSize: 11.5, color: muted, height: 1.5),
+            style: TextStyle(fontSize: 11.5, color: palette.muted, height: 1.65),
           ),
-          const SizedBox(height: 10),
-          for (var i = 0; i < top.length; i++)
+          const SizedBox(height: 14),
+          Divider(height: 1),
+          for (var i = 0; i < top.length; i++) ...[
+            if (i > 0) Divider(height: 1),
             SourceProbeRow(probe: top[i], index: i),
+          ],
           if (report.sources.length > top.length)
             Align(
               alignment: Alignment.centerLeft,
-              child: TextButton.icon(
+              child: TextButton(
                 onPressed: _showAllMirrors,
-                icon: const Icon(Icons.list_alt_rounded, size: 17),
-                label: Text('查看全部 ${report.sources.length} 个镜像结果'),
+                child: Text('查看全部 ${report.sources.length} 个镜像结果'),
               ),
             ),
         ],
@@ -451,200 +424,193 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildComposer(BuildContext context) {
-    final dark = Theme.of(context).brightness == Brightness.dark;
-    final surface = dark ? const Color(0xFF0B1524) : Colors.white;
-    final busy = c.busy;
-    final percent = c.snapshot != null && c.downloading
-        ? c.snapshot!.progress
-        : null;
-    return Container(
-      decoration: BoxDecoration(
-        color: surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(26)),
-        border: Border(
-          top: BorderSide(
-            color: dark ? const Color(0xFF22324C) : const Color(0xFFE1E9F5),
+  /// 示例链接做成可点的整行，每行说明它是什么类型的链接——
+  /// 比三条下划线 URL 有用得多。
+  Widget _buildExamples(BuildContext context) {
+    final palette = AppPalette.of(context);
+    final examples = [
+      (
+        '单文件',
+        'rust-lang/rust · README.md',
+        'https://github.com/rust-lang/rust/blob/master/README.md',
+      ),
+      (
+        '仓库快照',
+        'git/git · master.zip',
+        'https://github.com/git/git/archive/refs/heads/master.zip',
+      ),
+      (
+        'Release 资产',
+        'jqlang/jq · jq-1.7.1-amd64.deb',
+        'https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-1.7.1-amd64.deb',
+      ),
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '试试这些',
+          style: serifStyle(
+            size: 15,
+            weight: FontWeight.w600,
+            color: palette.muted,
+            letterSpacing: 1.2,
           ),
         ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: dark ? 0.45 : 0.08),
-            blurRadius: 26,
-            offset: const Offset(0, -8),
+        const SizedBox(height: 6),
+        for (final example in examples)
+          _ExampleRow(
+            kind: example.$1,
+            label: example.$2,
+            onTap: () => _fill(example.$3),
+          ),
+        const SizedBox(height: 22),
+        Divider(height: 1),
+        const SizedBox(height: 18),
+        // 空着的下半屏不该只是死白：把「这个工具在做什么」写清楚，
+        // 顺手也是这一页的收尾。
+        _HowItWorks(),
+      ],
+    );
+  }
+}
+
+/// 首页收尾：三段式说明「链接怎么进来、怎么分片、怎么落地」。
+/// 只在没有探测结果时显示，避免占满用过的人的空间。
+class _HowItWorks extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    final steps = [
+      (
+        '解析',
+        '识别 GitHub 文件、Release、仓库归档或 Gist 链接，取出文件名与官方校验值。',
+      ),
+      (
+        '分片',
+        '先测常用镜像，按实测速度把连接分给快的源；每个源的首段内容会互相校验，'
+            '拼错页面的源直接被排除。',
+      ),
+      (
+        '落地',
+        '分片同时写入同一个文件，断点状态记在系统里；完成后算 SHA-256 与官方 digest 比对。',
+      ),
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (var i = 0; i < steps.length; i++) ...[
+          if (i > 0) const SizedBox(height: 14),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: 52,
+                child: Text(
+                  steps[i].$1,
+                  style: serifStyle(
+                    size: 12.5,
+                    weight: FontWeight.w600,
+                    color: palette.faint,
+                    letterSpacing: 1.5,
+                  ),
+                ),
+              ),
+              Expanded(
+                child: Text(
+                  steps[i].$2,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: palette.muted,
+                    height: 1.75,
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
-      ),
-      child: SafeArea(
-        top: false,
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 960),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.folder_special_rounded,
-                        size: 16,
-                        color: kAccent.withValues(alpha: 0.9),
-                      ),
-                      const SizedBox(width: 7),
-                      Expanded(
-                        child: Text.rich(
-                          TextSpan(
-                            children: [
-                              TextSpan(
-                                text: '保存到 ',
-                                style: TextStyle(
-                                  fontSize: 11.5,
-                                  color: Theme.of(context).colorScheme.onSurface
-                                      .withValues(alpha: 0.45),
-                                ),
-                              ),
-                              TextSpan(
-                                text: c.destinationLabel,
-                                style: TextStyle(
-                                  fontSize: 11.5,
-                                  fontWeight: FontWeight.w600,
-                                  color: Theme.of(context).colorScheme.onSurface
-                                      .withValues(alpha: 0.8),
-                                ),
-                              ),
-                            ],
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      InkWell(
-                        onTap: busy ? null : c.pickDownloadDirectory,
-                        borderRadius: BorderRadius.circular(8),
-                        child: const Padding(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
-                          child: Text(
-                            '更改',
-                            style: TextStyle(
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w700,
-                              color: kAccent,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 9),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _text,
-                          focusNode: _focus,
-                          onChanged: c.setUrl,
-                          onSubmitted: (_) => _download(),
-                          textInputAction: TextInputAction.go,
-                          maxLines: 1,
-                          style: const TextStyle(fontSize: 13.5),
-                          decoration: InputDecoration(
-                            hintText: '粘贴 GitHub 文件 / Release / 压缩包链接',
-                            hintStyle: TextStyle(
-                              fontSize: 13,
-                              color: Theme.of(context).colorScheme.onSurface
-                                  .withValues(alpha: 0.38),
-                            ),
-                            prefixIcon: const Icon(
-                              Icons.link_rounded,
-                              size: 19,
-                            ),
-                            suffixIcon: IconButton(
-                              tooltip: '粘贴剪贴板链接',
-                              onPressed: busy ? null : _paste,
-                              icon: const Icon(
-                                Icons.content_paste_go_rounded,
-                                size: 18,
-                              ),
-                            ),
-                            isDense: true,
-                            contentPadding: const EdgeInsets.symmetric(
-                              vertical: 14,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 9),
-                      SizedBox(
-                        height: 48,
-                        child: OutlinedButton(
-                          onPressed: busy ? null : _test,
-                          child: const Text('测试'),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 9),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 52,
-                    child: FilledButton(
-                      onPressed: busy ? null : _download,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: kAccent,
-                        disabledBackgroundColor: kAccent.withValues(
-                          alpha: 0.35,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(15),
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          if (busy && percent != null) ...[
-                            SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                value: percent > 0 ? percent : null,
-                                strokeWidth: 2.4,
-                                color: Colors.white,
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Text(
-                              '下载中 ${(percent * 100).toStringAsFixed(0)}%',
-                              style: const TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ] else ...[
-                            const Icon(Icons.rocket_launch_rounded, size: 19),
-                            const SizedBox(width: 9),
-                            Text(
-                              busy ? '处理中…' : '开始下载',
-                              style: const TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
+      ],
+    );
+  }
+}
+
+class _ExampleRow extends StatelessWidget {
+  final String kind;
+  final String label;
+  final VoidCallback onTap;
+
+  const _ExampleRow({
+    required this.kind,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 9),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 74,
+              child: Text(
+                kind,
+                style: TextStyle(fontSize: 11, color: palette.faint),
               ),
             ),
-          ),
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontFamily: kMono,
+                  fontFamilyFallback: kMonoFallback,
+                  fontSize: 11.5,
+                  color: palette.muted,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Icon(
+              Icons.north_east_rounded,
+              size: 13,
+              color: palette.faint,
+            ),
+          ],
         ),
       ),
     );
   }
 }
+
+/// 右上角的源数量：小数字 + 说明，不用彩色胶囊。
+class _MirrorCount extends StatelessWidget {
+  final int count;
+  const _MirrorCount({required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Text(
+          '$count',
+          style: dataStyle(size: 19, weight: FontWeight.w600, color: palette.ink),
+        ),
+        const SizedBox(height: 1),
+        Text(
+          '个镜像源',
+          style: TextStyle(fontSize: 10, color: palette.faint),
+        ),
+      ],
+    );
+  }
+}
+
+

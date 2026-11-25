@@ -18,37 +18,34 @@ class SettingsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(18, 14, 18, 28),
-      children: [
-        Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 960),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text('设置', style: Theme.of(context).textTheme.headlineSmall),
-                const SizedBox(height: 14),
-                _buildDestination(context),
-                const SizedBox(height: 12),
-                _buildPerformance(context),
-                const SizedBox(height: 12),
-                _buildAppearance(context),
-                const SizedBox(height: 12),
-                _buildMirrors(context),
-                const SizedBox(height: 12),
-                _buildAbout(context),
-              ],
-            ),
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 920),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const PageHead(title: '设置', subtitle: '按自己的网络与习惯微调。'),
+              const SizedBox(height: 22),
+              _buildDestination(context),
+              const SizedBox(height: 12),
+              _buildPerformance(context),
+              const SizedBox(height: 12),
+              _buildAppearance(context),
+              const SizedBox(height: 12),
+              _buildMirrors(context),
+              const SizedBox(height: 12),
+              _buildAbout(context),
+            ],
           ),
         ),
-      ],
+      ),
     );
   }
 
   Widget _buildDestination(BuildContext context) {
-    final muted = Theme.of(context).colorScheme.onSurface
-        .withValues(alpha: 0.5);
+    final palette = AppPalette.of(context);
     return AppCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -61,26 +58,13 @@ class SettingsPage extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: kAccent.withValues(alpha: 0.07),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: kAccent.withValues(alpha: 0.2)),
+              color: palette.surfaceAlt,
+              borderRadius: BorderRadius.circular(10),
             ),
             child: Row(
               children: [
-                Container(
-                  width: 42,
-                  height: 42,
-                  decoration: BoxDecoration(
-                    color: kAccent.withValues(alpha: 0.14),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Icon(
-                    Icons.folder_special_rounded,
-                    color: kAccent,
-                    size: 22,
-                  ),
-                ),
-                const SizedBox(width: 12),
+                Icon(Icons.folder_outlined, size: 18, color: palette.accent),
+                const SizedBox(width: 11),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -89,18 +73,22 @@ class SettingsPage extends StatelessWidget {
                         c.destinationLabel,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w700,
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: palette.ink,
                         ),
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        c.destinationSubLabel ?? '',
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 11.5, color: muted),
-                      ),
+                      if ((c.destinationSubLabel ?? '').isNotEmpty &&
+                          c.destinationSubLabel != c.destinationLabel) ...[
+                        const SizedBox(height: 3),
+                        Text(
+                          c.destinationSubLabel ?? '',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 11, color: palette.muted),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -112,24 +100,26 @@ class SettingsPage extends StatelessWidget {
             spacing: 9,
             runSpacing: 9,
             children: [
-              FilledButton.icon(
+              FilledButton(
                 onPressed: c.pickDownloadDirectory,
-                icon: const Icon(Icons.drive_file_move_rounded, size: 18),
-                label: const Text('选择文件夹'),
+                child: const Text('选择文件夹'),
               ),
-              OutlinedButton.icon(
+              OutlinedButton(
                 onPressed: c.resetDownloadDirectory,
-                icon: const Icon(Icons.restart_alt_rounded, size: 18),
-                label: const Text('恢复默认'),
+                child: const Text('恢复默认'),
               ),
             ],
           ),
           if (c.isAndroid) ...[
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
             Text(
               '提示：Android 建议选择一个公共文件夹（如 Download/InkFetch）。'
               '未选择时文件保存在应用专属目录，卸载应用会一并删除。',
-              style: TextStyle(fontSize: 11.5, color: muted, height: 1.5),
+              style: TextStyle(
+                fontSize: 11.5,
+                color: palette.muted,
+                height: 1.55,
+              ),
             ),
           ],
         ],
@@ -138,19 +128,37 @@ class SettingsPage extends StatelessWidget {
   }
 
   Widget _buildPerformance(BuildContext context) {
-    final muted = Theme.of(context).colorScheme.onSurface
-        .withValues(alpha: 0.5);
+    final palette = AppPalette.of(context);
     return AppCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SectionHeader(title: '下载性能', subtitle: '线程会在多个镜像之间按实测速度加权分配'),
-          const SizedBox(height: 10),
+          const SectionHeader(
+            title: '下载性能',
+            subtitle: '线程会在多个镜像之间按实测速度加权分配',
+          ),
+          const SizedBox(height: 16),
           Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Text('最大并发连接', style: Theme.of(context).textTheme.titleSmall),
+              Text(
+                '最大并发连接',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: palette.ink,
+                ),
+              ),
               const Spacer(),
-              Pill(text: '${c.settings.maxConnections} 线程', color: kAccent),
+              Text(
+                '${c.settings.maxConnections}',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: palette.ink,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
             ],
           ),
           Slider(
@@ -158,41 +166,28 @@ class SettingsPage extends StatelessWidget {
             min: 4,
             max: 48,
             divisions: 22,
-            label: '${c.settings.maxConnections}',
             onChanged: (value) => c.setMaxConnections(value.round()),
           ),
           Text(
             '连接越多越容易跑满带宽，也会消耗更多镜像配额。默认 32 线程，'
             '网络较差时适当降低。',
-            style: TextStyle(fontSize: 11.5, color: muted, height: 1.5),
+            style: TextStyle(fontSize: 11.5, color: palette.muted, height: 1.55),
           ),
-          const SizedBox(height: 8),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
+          const SizedBox(height: 14),
+          Divider(color: palette.border),
+          _SwitchRow(
+            title: 'SHA-256 完整性校验',
+            subtitle: '完成后计算哈希；Release 会与 GitHub 官方 digest 比对',
             value: c.settings.verifySha,
             onChanged: c.setVerifySha,
-            title: const Text(
-              'SHA-256 完整性校验',
-              style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
-            ),
-            subtitle: Text(
-              '完成后计算哈希；Release 会与 GitHub 官方 digest 比对',
-              style: TextStyle(fontSize: 11.5, color: muted),
-            ),
           ),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
+          Divider(color: palette.border),
+          _SwitchRow(
+            title: '高精度测速',
+            subtitle: '每个源读取 1MB 样本，排序更准但更耗流量；'
+                '开启后可用分片源不足时才扩展到长尾与实验源',
             value: c.settings.deepProbeAll,
             onChanged: c.setDeepProbe,
-            title: const Text(
-              '高精度测速',
-              style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
-            ),
-            subtitle: Text(
-              '优先测试常用镜像，可用分片源不足时自动扩展到长尾与实验源；'
-              '开启后每个源读取 1MB 样本，排序更准但更耗流量',
-              style: TextStyle(fontSize: 11.5, color: muted),
-            ),
           ),
         ],
       ),
@@ -206,30 +201,9 @@ class SettingsPage extends StatelessWidget {
         children: [
           const SectionHeader(title: '外观', subtitle: '深色 / 浅色 / 跟随系统'),
           const SizedBox(height: 14),
-          SizedBox(
-            width: double.infinity,
-            child: SegmentedButton<String>(
-              segments: const [
-                ButtonSegment(
-                  value: 'system',
-                  icon: Icon(Icons.brightness_auto_rounded, size: 17),
-                  label: Text('跟随系统'),
-                ),
-                ButtonSegment(
-                  value: 'dark',
-                  icon: Icon(Icons.dark_mode_rounded, size: 17),
-                  label: Text('深色'),
-                ),
-                ButtonSegment(
-                  value: 'light',
-                  icon: Icon(Icons.light_mode_rounded, size: 17),
-                  label: Text('浅色'),
-                ),
-              ],
-              selected: {c.settings.theme},
-              onSelectionChanged: (values) => c.setTheme(values.first),
-              showSelectedIcon: false,
-            ),
+          _ThemeChoice(
+            value: c.settings.theme,
+            onChanged: (value) => c.setTheme(value),
           ),
         ],
       ),
@@ -237,11 +211,9 @@ class SettingsPage extends StatelessWidget {
   }
 
   Widget _buildMirrors(BuildContext context) {
-    final muted = Theme.of(context).colorScheme.onSurface
-        .withValues(alpha: 0.5);
     final lanes = ['official', 'cdn', 'proxy', 'domain'];
     return AppCard(
-      padding: const EdgeInsets.fromLTRB(18, 18, 18, 8),
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -255,25 +227,29 @@ class SettingsPage extends StatelessWidget {
               child: const Text('全部启用'),
             ),
           ),
-          const SizedBox(height: 4),
-          for (final lane in lanes)
-            _MirrorLane(lane: lane, controller: c, muted: muted),
+          const SizedBox(height: 6),
+          for (var i = 0; i < lanes.length; i++) ...[
+            if (i > 0) Divider(color: AppPalette.of(context).border),
+            _MirrorGroup(lane: lanes[i], controller: c),
+          ],
         ],
       ),
     );
   }
 
   Widget _buildAbout(BuildContext context) {
-    final muted = Theme.of(context).colorScheme.onSurface
-        .withValues(alpha: 0.5);
+    final palette = AppPalette.of(context);
+    final proxyCount = builtinMirrors
+        .where((m) => m.kind == MirrorKind.prefix)
+        .length;
     return AppCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const GradientBadge(size: 44, icon: Icons.bolt_rounded),
-              const SizedBox(width: 12),
+              const SealMark(size: 40),
+              const SizedBox(width: 13),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -283,46 +259,47 @@ class SettingsPage extends StatelessWidget {
                       builder: (context, snapshot) {
                         final info = snapshot.data;
                         final label = info == null
-                            ? 'InkFetch'
-                            : 'InkFetch ${info.version}';
+                            ? '墨取'
+                            : '墨取 ${info.version}';
                         return Text(
                           label,
-                          style: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w800,
+                          style: TextStyle(
+                            fontSize: 14.5,
+                            fontWeight: FontWeight.w600,
+                            color: palette.ink,
                           ),
                         );
                       },
                     ),
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 3),
                     Text(
                       '原生 Flutter · 无 WebView / 无本地网页服务',
-                      style: TextStyle(fontSize: 11.5, color: muted),
+                      style: TextStyle(fontSize: 11.5, color: palette.muted),
                     ),
                   ],
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
           Text(
             '内置 ${builtinMirrors.length} 个下载源：GitHub 官方、codeload、'
-            'jsDelivr、GitMirror 以及 ${builtinMirrors.where((m) => m.kind == MirrorKind.prefix).length} '
-            '个加速代理。下载前先测试常用镜像，可用分片源不足时才扩展到长尾源；'
+            'jsDelivr、GitMirror 以及 $proxyCount 个加速代理。'
+            '下载前先测试常用镜像，可用分片源不足时才扩展到长尾源；'
             '每个源读取 128KB（高精度 1MB）Range 样本并校验首段内容一致性，'
             '然后按实测速度分配连接、分片并发下载。',
-            style: TextStyle(fontSize: 12, color: muted, height: 1.65),
+            style: TextStyle(fontSize: 12, color: palette.muted, height: 1.65),
           ),
-          const SizedBox(height: 12),
-          Wrap(
+          const SizedBox(height: 14),
+          const Wrap(
             spacing: 7,
             runSpacing: 7,
-            children: const [
-              Pill(text: '多源分片', color: kAccent, dense: true),
-              Pill(text: '断点续传', color: kAccentAlt, dense: true),
-              Pill(text: 'SHA-256', color: kAccentAlt, dense: true),
-              Pill(text: 'Android SAF', color: kWarning, dense: true),
-              Pill(text: '桌面原生窗口', color: kWarning, dense: true),
+            children: [
+              QuietTag(text: '多源分片'),
+              QuietTag(text: '断点续传'),
+              QuietTag(text: 'SHA-256'),
+              QuietTag(text: 'Android SAF'),
+              QuietTag(text: '桌面原生窗口'),
             ],
           ),
         ],
@@ -331,96 +308,264 @@ class SettingsPage extends StatelessWidget {
   }
 }
 
-class _MirrorLane extends StatelessWidget {
-  final String lane;
-  final AppController controller;
-  final Color muted;
+/// 分段式主题选择，选中项改用边框与文字颜色区分，不使用填充色块。
+class _ThemeChoice extends StatelessWidget {
+  final String value;
+  final ValueChanged<String> onChanged;
 
-  const _MirrorLane({
-    required this.lane,
-    required this.controller,
-    required this.muted,
-  });
+  const _ThemeChoice({required this.value, required this.onChanged});
 
   @override
   Widget build(BuildContext context) {
-    final items = builtinMirrors.where((m) => m.lane == lane).toList();
-    final enabled = items
-        .where((m) => !controller.settings.disabledMirrors.contains(m.id))
-        .length;
-    return ExpansionTile(
-      tilePadding: EdgeInsets.zero,
-      childrenPadding: const EdgeInsets.only(bottom: 4),
-      shape: const Border(),
-      collapsedShape: const Border(),
-      title: Text(
-        laneLabel(lane),
-        style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
-      ),
-      subtitle: Text(
-        '$enabled / ${items.length} 已启用',
-        style: TextStyle(fontSize: 11.5, color: muted),
-      ),
+    final palette = AppPalette.of(context);
+    const options = [
+      ('system', '跟随系统', Icons.brightness_auto_outlined),
+      ('dark', '深色', Icons.dark_mode_outlined),
+      ('light', '浅色', Icons.light_mode_outlined),
+    ];
+    return Row(
       children: [
-        for (final mirror in items)
-          _MirrorTile(
-            mirror: mirror,
-            enabled: !controller.settings.disabledMirrors.contains(mirror.id),
-            controller: controller,
-            muted: muted,
+        for (var i = 0; i < options.length; i++) ...[
+          if (i > 0) const SizedBox(width: 8),
+          Expanded(
+            child: InkWell(
+              borderRadius: BorderRadius.circular(10),
+              onTap: () => onChanged(options[i].$1),
+              child: Container(
+                height: 44,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: value == options[i].$1
+                        ? palette.accent
+                        : palette.border,
+                  ),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      options[i].$3,
+                      size: 16,
+                      color: value == options[i].$1
+                          ? palette.accent
+                          : palette.muted,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      options[i].$2,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: value == options[i].$1
+                            ? FontWeight.w600
+                            : FontWeight.w500,
+                        color: value == options[i].$1
+                            ? palette.ink
+                            : palette.muted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ),
+        ],
       ],
     );
   }
 }
 
-class _MirrorTile extends StatelessWidget {
-  final MirrorSpec mirror;
-  final bool enabled;
-  final AppController controller;
-  final Color muted;
+class _SwitchRow extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final bool value;
+  final ValueChanged<bool> onChanged;
 
-  const _MirrorTile({
-    required this.mirror,
-    required this.enabled,
-    required this.controller,
-    required this.muted,
+  const _SwitchRow({
+    required this.title,
+    required this.subtitle,
+    required this.value,
+    required this.onChanged,
   });
 
   @override
   Widget build(BuildContext context) {
-    final host = mirror.base.isEmpty ? 'github.com' : mirror.base;
-    return SwitchListTile(
-      contentPadding: const EdgeInsets.only(left: 4, right: 4),
-      dense: true,
-      value: enabled,
-      onChanged: (value) => controller.toggleMirror(mirror.id, value),
-      title: Row(
+    final palette = AppPalette.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Flexible(
-            child: Text(
-              mirror.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
-              ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: palette.ink,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: palette.muted,
+                    height: 1.5,
+                  ),
+                ),
+              ],
             ),
           ),
-          if (mirror.experimental) ...[
-            const SizedBox(width: 6),
-            const Pill(text: '实验', color: kWarning, dense: true),
-          ],
+          const SizedBox(width: 12),
+          Switch(value: value, onChanged: onChanged),
         ],
       ),
-      subtitle: Text(
-        host,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(fontSize: 10.5, color: muted),
-      ),
-      secondary: const Icon(Icons.cloud_outlined, size: 18),
     );
   }
 }
+
+class _MirrorGroup extends StatefulWidget {
+  final String lane;
+  final AppController controller;
+
+  const _MirrorGroup({required this.lane, required this.controller});
+
+  @override
+  State<_MirrorGroup> createState() => _MirrorGroupState();
+}
+
+class _MirrorGroupState extends State<_MirrorGroup> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    final items = builtinMirrors.where((m) => m.lane == widget.lane).toList();
+    final enabled = items
+        .where(
+          (m) => !widget.controller.settings.disabledMirrors.contains(m.id),
+        )
+        .length;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: () => setState(() => _open = !_open),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Row(
+              children: [
+                Text(
+                  laneLabel(widget.lane),
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: palette.ink,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  '$enabled / ${items.length}',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: palette.faint,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+                const Spacer(),
+                AnimatedRotation(
+                  turns: _open ? 0.5 : 0,
+                  duration: const Duration(milliseconds: 160),
+                  child: Icon(
+                    Icons.keyboard_arrow_down_rounded,
+                    size: 18,
+                    color: palette.muted,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (_open)
+          for (final mirror in items)
+            _MirrorRow(
+              mirror: mirror,
+              enabled: !widget.controller.settings.disabledMirrors.contains(
+                mirror.id,
+              ),
+              controller: widget.controller,
+            ),
+        if (_open) const SizedBox(height: 4),
+      ],
+    );
+  }
+}
+
+class _MirrorRow extends StatelessWidget {
+  final MirrorSpec mirror;
+  final bool enabled;
+  final AppController controller;
+
+  const _MirrorRow({
+    required this.mirror,
+    required this.enabled,
+    required this.controller,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    final host = mirror.base.isEmpty ? 'github.com' : mirror.base;
+    return Padding(
+      padding: const EdgeInsets.only(left: 10, top: 2, bottom: 2),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        mirror.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w500,
+                          color: enabled ? palette.ink : palette.faint,
+                        ),
+                      ),
+                    ),
+                    if (mirror.experimental) ...[
+                      const SizedBox(width: 6),
+                      const QuietTag(text: '实验'),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  host,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 10, color: palette.faint),
+                ),
+              ],
+            ),
+          ),
+          Switch(
+            value: enabled,
+            onChanged: (value) => controller.toggleMirror(mirror.id, value),
+          ),
+        ],
+      ),
+    );
+  }
+}
+

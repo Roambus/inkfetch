@@ -4,23 +4,30 @@ import 'package:inkfetch/main.dart';
 import 'package:inkfetch/state/app_controller.dart';
 
 void main() {
-  testWidgets('首页固定底部下载栏与导航', (tester) async {
+  testWidgets('首页与底部导航', (tester) async {
     final controller = AppController();
     await tester.pumpWidget(InkFetchApp(controller: controller));
     await tester.pumpAndSettle();
 
-    expect(find.text('InkFetch'), findsOneWidget);
     expect(find.text('开始下载'), findsOneWidget);
     expect(find.text('下载'), findsWidgets);
+    expect(find.text('任务'), findsWidgets);
     expect(find.text('记录'), findsWidgets);
     expect(find.text('设置'), findsWidgets);
+  });
 
-    await tester.drag(
-      find.byType(SingleChildScrollView).first,
-      const Offset(0, -600),
-    );
+  testWidgets('桌面宽屏显示品牌名', (tester) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final controller = AppController();
+    await tester.pumpWidget(InkFetchApp(controller: controller));
     await tester.pumpAndSettle();
-    expect(find.text('开始下载'), findsOneWidget);
+
+    expect(find.text('墨取'), findsOneWidget);
+    expect(find.text('INKFETCH'), findsOneWidget);
   });
 
   testWidgets('切换记录与设置页', (tester) async {
@@ -44,11 +51,13 @@ void main() {
     await tester.pumpWidget(InkFetchApp(controller: controller));
     await tester.pumpAndSettle();
 
-    final example = find.textContaining('github.com/rust-lang').first;
+    // 示例行显示的是“仓库/文件”这样的可读标签，不再直接铺 URL。
+    final example = find.textContaining('rust-lang/rust').first;
     await tester.ensureVisible(example);
     await tester.pumpAndSettle();
     await tester.tap(example);
     await tester.pumpAndSettle();
     expect(controller.urlInput, contains('rust-lang/rust'));
+    expect(controller.urlInput, startsWith('https://github.com/'));
   });
 }

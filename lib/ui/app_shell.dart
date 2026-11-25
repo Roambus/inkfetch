@@ -61,71 +61,132 @@ class _AppShellState extends State<AppShell> {
 
   @override
   Widget build(BuildContext context) {
-    final wide = MediaQuery.sizeOf(context).width >= 880;
-    final pages = <Widget>[
-      HomePage(controller: c),
-      DownloadPage(controller: c),
-      HistoryPage(controller: c),
-      SettingsPage(controller: c),
-    ];
-    final body = IndexedStack(index: c.tabIndex, children: pages);
-
-    // 固定字号的小布局在超大字体缩放下会重叠，这里限制上限。
     final media = MediaQuery.of(context);
-    return MediaQuery(
-      data: media.copyWith(
-        textScaler: media.textScaler.clamp(maxScaleFactor: 1.4),
-      ),
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        body: AppBackground(
-          child: SafeArea(
-            bottom: !wide,
-            child: wide
-                ? Row(
-                    children: [
-                      _buildRail(context),
-                      Expanded(child: body),
-                    ],
-                  )
-                : body,
-          ),
+    return ListenableBuilder(
+      listenable: c,
+      builder: (context, _) => MediaQuery(
+        data: media.copyWith(
+          textScaler: media.textScaler.clamp(maxScaleFactor: 1.3),
         ),
-        bottomNavigationBar: wide ? null : _buildBottomBar(context),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final wide = constraints.maxWidth >= 900;
+            return Scaffold(
+              backgroundColor: Colors.transparent,
+              body: AppBackground(
+                child: SafeArea(
+                  bottom: !wide,
+                  child: wide
+                      ? Row(
+                          children: [
+                            _SideBar(controller: c),
+                            Expanded(child: _content()),
+                          ],
+                        )
+                      : _content(),
+                ),
+              ),
+              bottomNavigationBar: wide ? null : _BottomBar(controller: c),
+            );
+          },
+        ),
       ),
     );
   }
 
-  Widget _buildRail(BuildContext context) {
-    final dark = Theme.of(context).brightness == Brightness.dark;
+  /// 只构建当前页，避免常驻四页产生大量无效语义节点。
+  Widget _content() {
+    return switch (c.tabIndex) {
+      1 => DownloadPage(controller: c),
+      2 => HistoryPage(controller: c),
+      3 => SettingsPage(controller: c),
+      _ => HomePage(controller: c),
+    };
+  }
+}
+
+/// 桌面侧栏：印章 + 宋体品牌字，导航项左侧一条墨线指示当前位置。
+class _SideBar extends StatelessWidget {
+  final AppController controller;
+  const _SideBar({required this.controller});
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
     return Container(
-      width: 92,
+      width: 216,
       decoration: BoxDecoration(
-        border: Border(
-          right: BorderSide(
-            color: dark ? const Color(0xFF1D2B43) : const Color(0xFFE4EBF6),
-          ),
-        ),
+        color: palette.background,
+        border: Border(right: BorderSide(color: palette.border)),
       ),
+      padding: const EdgeInsets.fromLTRB(16, 24, 16, 20),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const SizedBox(height: 18),
-          const GradientBadge(size: 42, icon: Icons.bolt_rounded),
-          const SizedBox(height: 26),
-          Expanded(
-            child: NavigationRail(
-              selectedIndex: c.tabIndex,
-              onDestinationSelected: c.setTab,
-              labelType: NavigationRailLabelType.all,
-              backgroundColor: Colors.transparent,
-              groupAlignment: -1,
-              destinations: [
-                for (final item in _navItems)
-                  NavigationRailDestination(
-                    icon: Icon(item.$1),
-                    selectedIcon: Icon(item.$2),
-                    label: Text(item.$3),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Row(
+              children: [
+                const SealMark(size: 34),
+                const SizedBox(width: 11),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '墨取',
+                        style: serifStyle(
+                          size: 19,
+                          color: palette.ink,
+                          letterSpacing: 3,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'INKFETCH',
+                        style: TextStyle(
+                          fontFamily: kMono,
+                          fontFamilyFallback: kMonoFallback,
+                          fontSize: 8.5,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 2.2,
+                          color: palette.faint,
+                        ),
+                      ),
+                    ],
                   ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 32),
+          for (final item in _buildNavItems(controller))
+            _SideNavItem(
+              item: item,
+              selected: controller.tabIndex == item.index,
+              onTap: () => controller.setTab(item.index),
+            ),
+          const Spacer(),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Divider(color: palette.border),
+                const SizedBox(height: 14),
+                Text(
+                  '本地运行',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: palette.muted,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  '不上传任何数据',
+                  style: TextStyle(fontSize: 10.5, color: palette.faint),
+                ),
               ],
             ),
           ),
@@ -133,26 +194,196 @@ class _AppShellState extends State<AppShell> {
       ),
     );
   }
+}
 
-  Widget _buildBottomBar(BuildContext context) {
-    return NavigationBar(
-      selectedIndex: c.tabIndex,
-      onDestinationSelected: c.setTab,
-      destinations: [
-        for (final item in _navItems)
-          NavigationDestination(
-            icon: Icon(item.$1),
-            selectedIcon: Icon(item.$2),
-            label: item.$3,
+class _SideNavItem extends StatelessWidget {
+  final _NavItem item;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _SideNavItem({
+    required this.item,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 2),
+      child: Material(
+        color: selected ? palette.surface : Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+          side: BorderSide(
+            color: selected ? palette.border : Colors.transparent,
           ),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(11, 10, 11, 10),
+            child: Row(
+              children: [
+                Icon(
+                  item.icon,
+                  size: 17,
+                  color: selected ? palette.accent : palette.faint,
+                ),
+                const SizedBox(width: 11),
+                Expanded(
+                  child: Text(
+                    item.label,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                      letterSpacing: 0.6,
+                      color: selected ? palette.ink : palette.muted,
+                    ),
+                  ),
+                ),
+                if (item.badge != null)
+                  _NavBadge(
+                    count: item.badge!(context),
+                    active: selected,
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _NavBadge extends StatelessWidget {
+  final int count;
+  final bool active;
+  const _NavBadge({required this.count, required this.active});
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    if (count <= 0) return const SizedBox.shrink();
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      decoration: BoxDecoration(
+        color: active ? palette.accent : palette.surfaceAlt,
+        borderRadius: BorderRadius.circular(3),
+      ),
+      child: Text(
+        '$count',
+        style: dataStyle(
+          size: 9.5,
+          weight: FontWeight.w600,
+          color: active ? palette.onPrimaryFill : palette.muted,
+          letterSpacing: 0,
+        ),
+      ),
+    );
+  }
+}
+
+/// 手机底部栏：选中项上方一小段墨线，比整块着色克制。
+class _BottomBar extends StatelessWidget {
+  final AppController controller;
+  const _BottomBar({required this.controller});
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    return Container(
+      decoration: BoxDecoration(
+        color: palette.surface,
+        border: Border(top: BorderSide(color: palette.border)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: 56,
+          child: Row(
+            children: [
+              for (final item in _buildNavItems(controller))
+                Expanded(
+                  child: InkWell(
+                    onTap: () => controller.setTab(item.index),
+                    child: _BottomTab(
+                      item: item,
+                      selected: controller.tabIndex == item.index,
+                      badge: item.badge?.call(context) ?? 0,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BottomTab extends StatelessWidget {
+  final _NavItem item;
+  final bool selected;
+  final int badge;
+
+  const _BottomTab({
+    required this.item,
+    required this.selected,
+    required this.badge,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Container(
+          width: 16,
+          height: 2,
+          margin: const EdgeInsets.only(bottom: 7),
+          decoration: BoxDecoration(
+            color: selected ? palette.accent : Colors.transparent,
+            borderRadius: BorderRadius.circular(1),
+          ),
+        ),
+        Icon(
+          item.icon,
+          size: 19,
+          color: selected ? palette.accent : palette.faint,
+        ),
+        const SizedBox(height: 4),
+        Text(
+          item.label,
+          style: TextStyle(
+            fontSize: 10.5,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+            letterSpacing: 0.5,
+            color: selected ? palette.ink : palette.faint,
+          ),
+        ),
       ],
     );
   }
-
-  static const List<(IconData, IconData, String)> _navItems = [
-    (Icons.rocket_launch_outlined, Icons.rocket_launch_rounded, '下载'),
-    (Icons.cloud_download_outlined, Icons.cloud_download_rounded, '任务'),
-    (Icons.history_outlined, Icons.history_rounded, '记录'),
-    (Icons.tune_outlined, Icons.tune_rounded, '设置'),
-  ];
 }
+
+class _NavItem {
+  final int index;
+  final IconData icon;
+  final String label;
+  /// 导航项右侧的计数（未完成任务数），没有就不显示。
+  final int Function(BuildContext)? badge;
+
+  const _NavItem(this.index, this.icon, this.label, {this.badge});
+}
+
+/// 导航项由 shell 在使用处补上 controller 的计数。
+List<_NavItem> _buildNavItems(AppController c) => [
+  _NavItem(0, Icons.add_link_rounded, '下载'),
+  _NavItem(1, Icons.south_rounded, '任务', badge: (_) => c.incompleteTasks.length),
+  _NavItem(2, Icons.history_rounded, '记录'),
+  _NavItem(3, Icons.tune_rounded, '设置'),
+];

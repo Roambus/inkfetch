@@ -4,46 +4,40 @@ import '../core/format.dart';
 import '../core/models.dart';
 import 'theme.dart';
 
+/// ─────────────────────────────────────────────────────────────
+/// 组件库。
+///
+/// 三条纪律：
+///   1. 容器只有一个层级（AppCard），不要卡片里套卡片；
+///   2. 层级靠留白、字重与发丝线区分，不靠阴影和更多灰阶；
+///   3. 数字一律等宽对齐，让速度跳动时整行不抖。
+/// ─────────────────────────────────────────────────────────────
+
+/// 墨色面板：发丝描边，无阴影，无渐变。
 class AppCard extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;
   final Color? color;
   final double radius;
-  final Gradient? gradient;
   final bool border;
 
   const AppCard({
     super.key,
     required this.child,
-    this.padding = const EdgeInsets.all(18),
+    this.padding = const EdgeInsets.all(20),
     this.color,
-    this.radius = 22,
-    this.gradient,
+    this.radius = 14,
     this.border = true,
   });
 
   @override
   Widget build(BuildContext context) {
-    final dark = Theme.of(context).brightness == Brightness.dark;
+    final palette = AppPalette.of(context);
     return Container(
       decoration: BoxDecoration(
-        color: color ?? (dark ? const Color(0xFF101C2E) : Colors.white),
-        gradient: gradient,
+        color: color ?? palette.surface,
         borderRadius: BorderRadius.circular(radius),
-        border: border
-            ? Border.all(
-                color: dark ? const Color(0xFF22324C) : const Color(0xFFE4EBF6),
-              )
-            : null,
-        boxShadow: dark
-            ? null
-            : [
-                BoxShadow(
-                  color: const Color(0xFF0F2A5A).withValues(alpha: 0.05),
-                  blurRadius: 24,
-                  offset: const Offset(0, 10),
-                ),
-              ],
+        border: border ? Border.all(color: palette.border) : null,
       ),
       child: Material(
         type: MaterialType.transparency,
@@ -55,6 +49,61 @@ class AppCard extends StatelessWidget {
   }
 }
 
+/// 页面抬头：一枚宋体大标题 + 一行说明，右上角放本页主要的动作。
+/// 底部一道发丝线，把抬头和内容分开——这条线是版式的节奏点。
+class PageHead extends StatelessWidget {
+  final String title;
+  final String? subtitle;
+  final Widget? trailing;
+
+  const PageHead({
+    super.key,
+    required this.title,
+    this.subtitle,
+    this.trailing,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    return Container(
+      padding: const EdgeInsets.only(bottom: 18),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: palette.border)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: Theme.of(context).textTheme.displaySmall),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 7),
+                  Text(
+                    subtitle!,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      color: palette.muted,
+                      height: 1.5,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          if (trailing != null) ...[
+            const SizedBox(width: 16),
+            Padding(padding: const EdgeInsets.only(bottom: 2), child: trailing),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// 小节标题。左侧一小段墨条，是这套界面的排版权记。
 class SectionHeader extends StatelessWidget {
   final String title;
   final String? subtitle;
@@ -69,11 +118,19 @@ class SectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final muted = Theme.of(context).colorScheme.onSurface
-        .withValues(alpha: 0.55);
+    final palette = AppPalette.of(context);
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Container(
+          width: 2.5,
+          height: 15,
+          margin: const EdgeInsets.only(top: 2, right: 10),
+          decoration: BoxDecoration(
+            color: palette.accent,
+            borderRadius: BorderRadius.circular(1.5),
+          ),
+        ),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -83,7 +140,11 @@ class SectionHeader extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text(
                   subtitle!,
-                  style: TextStyle(fontSize: 12.5, color: muted, height: 1.4),
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: palette.muted,
+                    height: 1.5,
+                  ),
                 ),
               ],
             ],
@@ -95,101 +156,63 @@ class SectionHeader extends StatelessWidget {
   }
 }
 
-class Pill extends StatelessWidget {
-  final String text;
-  final Color color;
-  final IconData? icon;
-  final bool dense;
-
-  const Pill({
-    super.key,
-    required this.text,
-    this.color = kAccent,
-    this.icon,
-    this.dense = false,
-  });
+/// 印章。品牌标记不是下载箭头，是一枚朱砂印：
+/// 方框、宋体「墨」字、右下角一点留白的不完美。
+class SealMark extends StatelessWidget {
+  final double size;
+  const SealMark({super.key, this.size = 34});
 
   @override
   Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    final seal = palette.dark ? const Color(0xFFC4553F) : kCinnabar;
     return Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: dense ? 7 : 10,
-        vertical: dense ? 3 : 5,
-      ),
+      width: size,
+      height: size,
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.13),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
+        color: seal,
+        borderRadius: BorderRadius.circular(size * 0.16),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (icon != null) ...[
-            Icon(icon, size: dense ? 11 : 13, color: color),
-            const SizedBox(width: 4),
-          ],
-          Text(
-            text,
-            style: TextStyle(
-              color: color,
-              fontSize: dense ? 10.5 : 11.5,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.1,
-            ),
-          ),
-        ],
+      alignment: Alignment.center,
+      child: Text(
+        '墨',
+        style: TextStyle(
+          fontFamily: kSerif,
+          fontFamilyFallback: kSerifFallback,
+          fontSize: size * 0.62,
+          height: 1,
+          fontWeight: FontWeight.w700,
+          color: const Color(0xFFF7F2E9),
+        ),
       ),
     );
   }
 }
 
-class StatBlock extends StatelessWidget {
+/// 状态点 + 文字。用一小块实心色块表示状态，比整块着色更克制。
+class StatusDot extends StatelessWidget {
+  final Color color;
   final String label;
-  final String value;
-  final Color? accent;
-  final IconData? icon;
 
-  const StatBlock({
-    super.key,
-    required this.label,
-    required this.value,
-    this.accent,
-    this.icon,
-  });
+  const StatusDot({super.key, required this.color, required this.label});
 
   @override
   Widget build(BuildContext context) {
-    final muted = Theme.of(context).colorScheme.onSurface
-        .withValues(alpha: 0.5);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Row(
-          children: [
-            if (icon != null) ...[
-              Icon(icon, size: 13, color: muted),
-              const SizedBox(width: 4),
-            ],
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 11.5,
-                color: muted,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ],
+        Container(
+          width: 6,
+          height: 6,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
-        const SizedBox(height: 5),
+        const SizedBox(width: 6),
         Text(
-          value,
+          label,
           style: TextStyle(
-            fontSize: 19,
-            fontWeight: FontWeight.w700,
-            letterSpacing: -0.4,
-            color: accent ?? Theme.of(context).colorScheme.onSurface,
-            fontFeatures: const [FontFeature.tabularFigures()],
+            fontSize: 11.5,
+            fontWeight: FontWeight.w500,
+            color: color,
           ),
         ),
       ],
@@ -197,74 +220,128 @@ class StatBlock extends StatelessWidget {
   }
 }
 
-class GradientBadge extends StatelessWidget {
-  final double size;
-  final IconData icon;
-  const GradientBadge({
-    super.key,
-    this.size = 46,
-    this.icon = Icons.bolt_rounded,
-  });
+class StatusChip extends StatelessWidget {
+  final DownloadPhase phase;
+  const StatusChip({super.key, required this.phase});
 
   @override
   Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    final color = switch (phase) {
+      DownloadPhase.downloading => palette.accent,
+      DownloadPhase.paused => palette.warning,
+      DownloadPhase.verifying => palette.accent,
+      DownloadPhase.completed => palette.positive,
+      DownloadPhase.failed => palette.danger,
+      DownloadPhase.cancelled => palette.warning,
+    };
+    return StatusDot(color: color, label: phaseLabel(phase));
+  }
+}
+
+/// 中性标签：只有背景，没有描边，避免满屏小盒子。
+class QuietTag extends StatelessWidget {
+  final String text;
+  const QuietTag({super.key, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
     return Container(
-      width: size,
-      height: size,
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(size * 0.3),
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [kAccent, kAccentAlt],
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: kAccent.withValues(alpha: 0.35),
-            blurRadius: 18,
-            offset: const Offset(0, 8),
-          ),
-        ],
+        color: palette.surfaceAlt,
+        borderRadius: BorderRadius.circular(3),
       ),
-      child: Icon(icon, color: Colors.white, size: size * 0.5),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 10,
+          color: palette.muted,
+          fontWeight: FontWeight.w500,
+          letterSpacing: 0.2,
+        ),
+      ),
     );
   }
 }
 
-class StatGrid extends StatelessWidget {
-  final List<Widget> items;
-  final double spacing;
+/// 仪表读数：小号标签在上，等宽大数字在下。
+class Reading extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color? accent;
+  final double valueSize;
 
-  const StatGrid({super.key, required this.items, this.spacing = 10});
+  const Reading({
+    super.key,
+    required this.label,
+    required this.value,
+    this.accent,
+    this.valueSize = 18,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 10.5,
+            color: palette.faint,
+            fontWeight: FontWeight.w500,
+            letterSpacing: 0.3,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          value,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: dataStyle(
+            size: valueSize,
+            weight: FontWeight.w600,
+            color: accent ?? palette.ink,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 一排读数，用竖线分隔；窄屏自动折成两列。
+class ReadingStrip extends StatelessWidget {
+  final List<Widget> items;
+
+  const ReadingStrip({super.key, required this.items});
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
     return LayoutBuilder(
       builder: (context, constraints) {
-        final twoRows = constraints.maxWidth < 620;
-        if (!twoRows) {
-          return Row(
-            children: [
-              for (var i = 0; i < items.length; i++) ...[
-                if (i > 0) SizedBox(width: spacing),
-                Expanded(child: items[i]),
-              ],
-            ],
-          );
-        }
+        final columns = constraints.maxWidth < 560 ? 2 : items.length;
         final rows = <Widget>[];
-        for (var i = 0; i < items.length; i += 2) {
-          if (i > 0) rows.add(SizedBox(height: 14));
-          final left = items[i];
-          final right = i + 1 < items.length ? items[i + 1] : null;
+        for (var i = 0; i < items.length; i += columns) {
+          if (i > 0) rows.add(const SizedBox(height: 18));
+          final slice = items.sublist(i, (i + columns).clamp(0, items.length));
           rows.add(
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(child: left),
-                if (right != null) ...[
-                  SizedBox(width: spacing),
-                  Expanded(child: right),
+                for (var j = 0; j < slice.length; j++) ...[
+                  if (j > 0)
+                    Container(
+                      width: 1,
+                      height: 32,
+                      margin: const EdgeInsets.symmetric(horizontal: 18),
+                      color: palette.border,
+                    ),
+                  Expanded(child: slice[j]),
                 ],
               ],
             ),
@@ -279,24 +356,7 @@ class StatGrid extends StatelessWidget {
   }
 }
 
-class StatusChip extends StatelessWidget {
-  final DownloadPhase phase;
-  const StatusChip({super.key, required this.phase});
-
-  @override
-  Widget build(BuildContext context) {
-    final (color, icon) = switch (phase) {
-      DownloadPhase.downloading => (kAccent, Icons.downloading_rounded),
-      DownloadPhase.paused => (kWarning, Icons.pause_rounded),
-      DownloadPhase.verifying => (kAccentAlt, Icons.verified_rounded),
-      DownloadPhase.completed => (kAccentAlt, Icons.check_circle_rounded),
-      DownloadPhase.failed => (kDanger, Icons.error_rounded),
-      DownloadPhase.cancelled => (kWarning, Icons.cancel_rounded),
-    };
-    return Pill(text: phaseLabel(phase), color: color, icon: icon);
-  }
-}
-
+/// 空状态：一句话说清下一步，不摆装饰。
 class EmptyState extends StatelessWidget {
   final IconData icon;
   final String title;
@@ -313,36 +373,30 @@ class EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final muted = Theme.of(context).colorScheme.onSurface
-        .withValues(alpha: 0.5);
+    final palette = AppPalette.of(context);
     return Center(
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 48),
+        padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 64),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 76,
-              height: 76,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: kAccent.withValues(alpha: 0.1),
-                border: Border.all(color: kAccent.withValues(alpha: 0.22)),
-              ),
-              child: Icon(icon, size: 34, color: kAccent),
-            ),
+            Icon(icon, size: 26, color: palette.faint),
             const SizedBox(height: 20),
             Text(
               title,
-              style: Theme.of(context).textTheme.titleMedium,
+              style: Theme.of(context).textTheme.headlineSmall,
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 9),
             ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 380),
+              constraints: const BoxConstraints(maxWidth: 330),
               child: Text(
                 description,
-                style: TextStyle(fontSize: 13, color: muted, height: 1.6),
+                style: TextStyle(
+                  fontSize: 12.5,
+                  color: palette.muted,
+                  height: 1.7,
+                ),
                 textAlign: TextAlign.center,
               ),
             ),
@@ -354,6 +408,7 @@ class EmptyState extends StatelessWidget {
   }
 }
 
+/// 镜像探测结果行：名称、类型、延迟、速度。
 class SourceProbeRow extends StatelessWidget {
   final SourceProbe probe;
   final int? index;
@@ -362,85 +417,79 @@ class SourceProbeRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final muted = Theme.of(context).colorScheme.onSurface
-        .withValues(alpha: 0.48);
-    final color = index == null ? kAccent : siteColor(index!);
-    final statusColor = switch (probe.status) {
-      ProbeStatus.healthy => kAccentAlt,
-      ProbeStatus.noRange => kWarning,
-      ProbeStatus.failed => kDanger,
-    };
-    final statusText = switch (probe.status) {
-      ProbeStatus.healthy => '可用 · 支持分片',
-      ProbeStatus.noRange => '可用 · 不支持分片',
-      ProbeStatus.failed => probe.error ?? '不可用',
+    final palette = AppPalette.of(context);
+    final failed = probe.status == ProbeStatus.failed;
+    final dotColor = switch (probe.status) {
+      ProbeStatus.healthy => palette.positive,
+      ProbeStatus.noRange => palette.warning,
+      ProbeStatus.failed => palette.faint,
     };
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 9),
       child: Row(
         children: [
           Container(
-            width: 9,
-            height: 9,
-            decoration: BoxDecoration(
-              color: statusColor,
-              shape: BoxShape.circle,
-            ),
+            width: 5,
+            height: 5,
+            decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
           ),
           const SizedBox(width: 11),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Row(
               children: [
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        probe.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w600,
-                          color: probe.status == ProbeStatus.failed
-                              ? muted
-                              : null,
-                        ),
-                      ),
+                Flexible(
+                  child: Text(
+                    probe.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w500,
+                      color: failed ? palette.faint : palette.ink,
                     ),
-                    const SizedBox(width: 7),
-                    Pill(
-                      text: laneLabel(probe.lane),
-                      color: color,
-                      dense: true,
-                    ),
-                    if (probe.experimental) ...[
-                      const SizedBox(width: 5),
-                      const Pill(text: '实验', color: kWarning, dense: true),
-                    ],
-                  ],
+                  ),
                 ),
-                const SizedBox(height: 3),
-                Text(
-                  probe.status == ProbeStatus.failed
-                      ? statusText
-                      : '${humanSpeed(probe.speedBps)} · ${probe.latencyMs}ms · '
-                            '${probe.httpStatus ?? '—'}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 11.5, color: muted),
-                ),
+                const SizedBox(width: 8),
+                QuietTag(text: laneLabel(probe.lane)),
               ],
             ),
           ),
-          if (probe.status != ProbeStatus.failed) ...[
-            const SizedBox(width: 8),
+          if (failed)
             Text(
-              humanSpeed(probe.speedBps),
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: statusColor,
+              probe.error ?? '不可用',
+              style: TextStyle(fontSize: 11, color: palette.faint),
+            )
+          else ...[
+            SizedBox(
+              width: 52,
+              child: Text(
+                '${probe.latencyMs}ms',
+                textAlign: TextAlign.right,
+                style: dataStyle(
+                  size: 11,
+                  weight: FontWeight.w400,
+                  color: palette.muted,
+                  letterSpacing: 0,
+                ),
+              ),
+            ),
+            const SizedBox(width: 14),
+            SizedBox(
+              width: 78,
+              child: Text(
+                probe.status == ProbeStatus.noRange
+                    ? '单流'
+                    : humanSpeed(probe.speedBps),
+                textAlign: TextAlign.right,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: dataStyle(
+                  size: 11.5,
+                  color: probe.status == ProbeStatus.noRange
+                      ? palette.warning
+                      : palette.ink,
+                  letterSpacing: 0,
+                ),
               ),
             ),
           ],
@@ -450,6 +499,7 @@ class SourceProbeRow extends StatelessWidget {
   }
 }
 
+/// 下载来源行：色条标识来源，右侧速度。
 class SiteLaneRow extends StatelessWidget {
   final SiteProgress site;
   final int index;
@@ -458,66 +508,59 @@ class SiteLaneRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final muted = Theme.of(context).colorScheme.onSurface
-        .withValues(alpha: 0.48);
-    final color = siteColor(index);
+    final palette = AppPalette.of(context);
+    final color = site.disabled ? palette.faint : siteColor(index);
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: 9),
       child: Row(
         children: [
           Container(
-            width: 10,
-            height: 10,
+            width: 3,
+            height: 15,
             decoration: BoxDecoration(
-              color: site.disabled ? muted : color,
-              borderRadius: BorderRadius.circular(3),
+              color: color,
+              borderRadius: BorderRadius.circular(1.5),
             ),
           ),
           const SizedBox(width: 11),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Row(
               children: [
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        site.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: site.disabled ? muted : null,
-                        ),
-                      ),
+                Flexible(
+                  child: Text(
+                    site.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w500,
+                      color: site.disabled ? palette.faint : palette.ink,
                     ),
-                    const SizedBox(width: 7),
-                    Pill(
-                      text: '${site.connections} 线程',
-                      color: color,
-                      dense: true,
-                    ),
-                    if (site.disabled) ...[
-                      const SizedBox(width: 5),
-                      const Pill(text: '已停用', color: kDanger, dense: true),
-                    ],
-                  ],
+                  ),
                 ),
-                const SizedBox(height: 3),
-                Text(
-                  '${humanBytes(site.bytes)} · ${site.errors} 次重试',
-                  style: TextStyle(fontSize: 11.5, color: muted),
-                ),
+                const SizedBox(width: 8),
+                QuietTag(text: '${site.connections} 线程'),
+                if (site.disabled) ...[
+                  const SizedBox(width: 6),
+                  Text(
+                    '已停用',
+                    style: TextStyle(fontSize: 10.5, color: palette.danger),
+                  ),
+                ],
               ],
             ),
           ),
-          Text(
-            humanSpeed(site.speedBps),
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              color: color,
+          const SizedBox(width: 10),
+          SizedBox(
+            width: 82,
+            child: Text(
+              humanSpeed(site.speedBps),
+              textAlign: TextAlign.right,
+              style: dataStyle(
+                size: 11.5,
+                color: site.disabled ? palette.faint : palette.ink,
+                letterSpacing: 0,
+              ),
             ),
           ),
         ],
@@ -526,62 +569,98 @@ class SiteLaneRow extends StatelessWidget {
   }
 }
 
-class ChunkHeatmap extends StatelessWidget {
+/// 分片条纹——这个应用的视觉签名。
+///
+/// 108 个镜像把一个大文件切成上千片同时拉，这件事本身就是产品。
+/// 所以不画成小方块网格，而画成一条连续的墨带：未下载是纸色，
+/// 已完成的按来源上色，失败是朱砂。它随下载推进而生长，
+/// 比任何进度条都更能说明「很多条线在同时供给一个文件」。
+class ShardBand extends StatelessWidget {
   final List<int> chunkMap;
-  const ChunkHeatmap({super.key, required this.chunkMap});
+  final double height;
+
+  const ShardBand({super.key, required this.chunkMap, this.height = 34});
 
   @override
   Widget build(BuildContext context) {
-    final dark = Theme.of(context).brightness == Brightness.dark;
+    final palette = AppPalette.of(context);
     if (chunkMap.isEmpty) {
       return Text(
-        '单流下载模式，无分片视图',
-        style: TextStyle(
-          fontSize: 12,
-          color: Theme.of(context).colorScheme.onSurface
-              .withValues(alpha: 0.45),
-        ),
+        '单流下载，无分片视图',
+        style: TextStyle(fontSize: 12, color: palette.muted),
       );
     }
-    const buckets = 160;
-    final step = (chunkMap.length / buckets).ceil().clamp(1, chunkMap.length);
-    final cells = <int>[];
-    for (var i = 0; i < chunkMap.length; i += step) {
-      final end = (i + step).clamp(0, chunkMap.length);
-      var chosen = 0;
-      for (var j = i; j < end; j++) {
-        final value = chunkMap[j];
-        if (value > 0) {
-          chosen = value;
-          break;
-        }
-        if (value < 0) chosen = value;
-      }
-      cells.add(chosen);
-    }
-    final pending = dark ? const Color(0xFF1A2740) : const Color(0xFFE2E9F5);
-    return Wrap(
-      spacing: 3,
-      runSpacing: 3,
-      children: [
-        for (final cell in cells)
-          Container(
-            width: 10,
-            height: 10,
-            decoration: BoxDecoration(
-              color: cell > 0
-                  ? siteColor(cell - 1)
-                  : cell < 0
-                  ? kDanger
-                  : pending,
-              borderRadius: BorderRadius.circular(2.5),
-            ),
-          ),
-      ],
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(3),
+      child: SizedBox(
+        height: height,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            // 一个分片至少要半个像素才看得见，超过就按比例合并。
+            final cells = constraints.maxWidth.floor().clamp(1, 4000);
+            final step = (chunkMap.length / cells).ceil().clamp(1, chunkMap.length);
+            final bars = <Widget>[];
+            for (var i = 0; i < chunkMap.length; i += step) {
+              final end = (i + step).clamp(0, chunkMap.length);
+              var chosen = 0;
+              for (var j = i; j < end; j++) {
+                final value = chunkMap[j];
+                if (value > 0) {
+                  chosen = value;
+                  break;
+                }
+                if (value < 0) chosen = value;
+              }
+              bars.add(
+                Expanded(
+                  flex: end - i,
+                  child: ColoredBox(
+                    color: chosen > 0
+                        ? siteColor(chosen - 1)
+                        : chosen < 0
+                        ? palette.danger
+                        : palette.surfaceAlt,
+                  ),
+                ),
+              );
+            }
+            return Row(
+              // stretch 是必须的：ColoredBox 没有固有高度，
+              // 否则整条带子会塌成 0 高。
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: bars,
+            );
+          },
+        ),
+      ),
     );
   }
 }
 
+/// 细线条进度条。
+class Meter extends StatelessWidget {
+  final double? value;
+  final Color? color;
+  final double height;
+
+  const Meter({super.key, this.value, this.color, this.height = 4});
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(height / 2),
+      child: LinearProgressIndicator(
+        value: value,
+        minHeight: height,
+        backgroundColor: palette.surfaceAlt,
+        color: color ?? palette.accent,
+      ),
+    );
+  }
+}
+
+/// 图例。
 class LegendDot extends StatelessWidget {
   final Color color;
   final String label;
@@ -589,8 +668,7 @@ class LegendDot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final muted = Theme.of(context).colorScheme.onSurface
-        .withValues(alpha: 0.5);
+    final palette = AppPalette.of(context);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -602,8 +680,8 @@ class LegendDot extends StatelessWidget {
             borderRadius: BorderRadius.circular(2),
           ),
         ),
-        const SizedBox(width: 5),
-        Text(label, style: TextStyle(fontSize: 10.5, color: muted)),
+        const SizedBox(width: 6),
+        Text(label, style: TextStyle(fontSize: 10.5, color: palette.muted)),
       ],
     );
   }

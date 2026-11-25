@@ -34,6 +34,21 @@ bool _fontsAvailable() =>
     _firstExisting(_cjkFontCandidates) != null &&
     _firstExisting(_iconFontCandidates) != null;
 
+/// 把 assets/fonts 里随包发布的字体按 pubspec 里声明的族名注册进来，
+/// 这样 golden 截的就是用户实际看到的字，而不是 fallback 方块。
+Future<void> _loadBundledFont(String family, List<String> assets) async {
+  final loader = FontLoader(family);
+  var loaded = false;
+  for (final asset in assets) {
+    final file = File(asset);
+    if (!file.existsSync()) continue;
+    final bytes = await file.readAsBytes();
+    loader.addFont(Future.value(ByteData.view(bytes.buffer)));
+    loaded = true;
+  }
+  if (loaded) await loader.load();
+}
+
 Future<void> _loadFonts() async {
   final cjk = _firstExisting(_cjkFontCandidates);
   final iconPath = _firstExisting(_iconFontCandidates);
@@ -48,6 +63,12 @@ Future<void> _loadFonts() async {
   final iconBytes = await File(iconPath).readAsBytes();
   icons.addFont(Future.value(ByteData.view(iconBytes.buffer)));
   await icons.load();
+
+  // 应用自己打包的字体：标题宋体与数字等宽。
+  await _loadBundledFont('Source Han Serif SC', [
+    'assets/fonts/InkSerif-Bold.ttf',
+  ]);
+  await _loadBundledFont('Cascadia Mono', ['assets/fonts/InkMono-Regular.ttf']);
 }
 
 SourceProbe _source(
@@ -334,3 +355,4 @@ void main() {
     await _golden(tester, 'settings_tablet');
   });
 }
+

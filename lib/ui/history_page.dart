@@ -15,57 +15,57 @@ class HistoryPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (c.history.isEmpty) {
-      return EmptyState(
-        icon: Icons.history_rounded,
-        title: '还没有下载记录',
-        description: '完成的下载会记录在这里，可直接打开文件或所在文件夹。',
-        action: OutlinedButton.icon(
-          onPressed: () => c.setTab(0),
-          icon: const Icon(Icons.add_link_rounded, size: 18),
-          label: const Text('去下载'),
-        ),
-      );
-    }
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(18, 14, 18, 28),
-      children: [
-        Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 960),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    Text(
-                      '下载记录',
-                      style: Theme.of(context).textTheme.headlineSmall,
+    final palette = AppPalette.of(context);
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 920),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              PageHead(
+                title: '记录',
+                subtitle: '完成、取消与失败的下载都会留在这里。',
+                trailing: c.history.isEmpty
+                    ? null
+                    : TextButton.icon(
+                        onPressed: () => _confirmClear(context),
+                        icon: const Icon(Icons.delete_sweep_outlined, size: 16),
+                        label: const Text('清空'),
+                      ),
+              ),
+              const SizedBox(height: 22),
+              if (c.history.isEmpty)
+                AppCard(
+                  child: EmptyState(
+                    icon: Icons.schedule_rounded,
+                    title: '还没有下载记录',
+                    description: '完成的下载会记录在这里，可直接打开文件或所在文件夹。',
+                    action: OutlinedButton.icon(
+                      onPressed: () => c.setTab(0),
+                      icon: const Icon(Icons.link_rounded, size: 17),
+                      label: const Text('去下载'),
                     ),
-                    const SizedBox(width: 10),
-                    Pill(
-                      text: '${c.history.length}',
-                      color: kAccent,
-                      dense: true,
-                    ),
-                    const Spacer(),
-                    TextButton.icon(
-                      onPressed: () => _confirmClear(context),
-                      icon: const Icon(Icons.delete_sweep_rounded, size: 18),
-                      label: const Text('清空'),
-                    ),
-                  ],
+                  ),
+                )
+              else
+                AppCard(
+                  padding: EdgeInsets.zero,
+                  child: Column(
+                    children: [
+                      for (var i = 0; i < c.history.length; i++) ...[
+                        if (i > 0)
+                          Divider(height: 1, color: palette.border),
+                        _HistoryRow(controller: c, entry: c.history[i]),
+                      ],
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 12),
-                for (final entry in c.history) ...[
-                  _HistoryCard(controller: c, entry: entry),
-                  const SizedBox(height: 10),
-                ],
-              ],
-            ),
+            ],
           ),
         ),
-      ],
+      ),
     );
   }
 
@@ -93,146 +93,130 @@ class HistoryPage extends StatelessWidget {
   }
 }
 
-class _HistoryCard extends StatelessWidget {
+class _HistoryRow extends StatelessWidget {
   final AppController controller;
   final HistoryEntry entry;
 
-  const _HistoryCard({required this.controller, required this.entry});
+  const _HistoryRow({required this.controller, required this.entry});
 
   @override
   Widget build(BuildContext context) {
-    final muted = Theme.of(context).colorScheme.onSurface
-        .withValues(alpha: 0.5);
+    final palette = AppPalette.of(context);
     final completed = entry.status == 'completed';
     final color = completed
-        ? kAccentAlt
-        : (entry.status == 'cancelled' ? kWarning : kDanger);
-    final icon = completed
-        ? Icons.check_circle_rounded
-        : (entry.status == 'cancelled'
-              ? Icons.cancel_rounded
-              : Icons.error_rounded);
-    return AppCard(
-      padding: const EdgeInsets.fromLTRB(16, 14, 10, 14),
-      child: Column(
+        ? palette.positive
+        : (entry.status == 'cancelled' ? palette.warning : palette.danger);
+    final statusText = completed
+        ? '已完成'
+        : (entry.status == 'cancelled' ? '已取消' : '失败');
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 14, 8, 14),
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(10),
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Container(
+              width: 7,
+              height: 7,
+              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  entry.filename,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
+                    color: palette.ink,
+                  ),
                 ),
-                child: Icon(icon, color: color, size: 19),
-              ),
-              const SizedBox(width: 11),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                const SizedBox(height: 5),
+                Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 8,
+                  runSpacing: 4,
                   children: [
                     Text(
-                      entry.filename,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                      ),
+                      statusText,
+                      style: TextStyle(fontSize: 11, color: color),
                     ),
-                    const SizedBox(height: 4),
                     Text(
-                      '${humanBytes(entry.total)} · '
-                      '${humanSpeed(entry.speedBps)} · '
-                      '${formatTime(entry.createdAt)}',
-                      style: TextStyle(fontSize: 11.5, color: muted),
+                      '${humanBytes(entry.total)} · ${humanSpeed(entry.speedBps)}',
+                      style: TextStyle(fontSize: 11, color: palette.muted),
                     ),
-                    if (entry.destPath.isNotEmpty) ...[
-                      const SizedBox(height: 3),
-                      Text(
-                        entry.destPath,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 11, color: muted),
-                      ),
-                    ],
-                    if (entry.error != null) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        entry.error!,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 11, color: kDanger),
-                      ),
-                    ],
+                    Text(
+                      formatTime(entry.createdAt),
+                      style: TextStyle(fontSize: 11, color: palette.faint),
+                    ),
                   ],
                 ),
-              ),
-              PopupMenuButton<String>(
-                tooltip: '更多操作',
-                onSelected: (action) async {
-                  switch (action) {
-                    case 'copy':
-                      await Clipboard.setData(ClipboardData(text: entry.url));
-                      break;
-                    case 'delete':
-                      await controller.deleteHistoryEntry(entry);
-                      break;
-                  }
-                },
-                itemBuilder: (context) => const [
-                  PopupMenuItem(
-                    value: 'copy',
-                    child: ListTile(
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      leading: Icon(Icons.copy_rounded, size: 18),
-                      title: Text('复制原始链接'),
-                    ),
-                  ),
-                  PopupMenuItem(
-                    value: 'delete',
-                    child: ListTile(
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      leading: Icon(Icons.delete_outline_rounded, size: 18),
-                      title: Text('删除记录'),
-                    ),
+                if (entry.destPath.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    entry.destPath,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 11, color: palette.faint),
                   ),
                 ],
+                if (entry.error != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    entry.error!,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 11, color: palette.danger),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 6),
+          if (completed)
+            IconButton(
+              tooltip: '打开文件',
+              onPressed: () => controller.openHistoryFile(entry),
+              icon: const Icon(Icons.open_in_new_rounded, size: 17),
+            ),
+          IconButton(
+            tooltip: '打开文件夹',
+            onPressed: () => controller.openHistoryFolder(entry),
+            icon: const Icon(Icons.folder_open_outlined, size: 17),
+          ),
+          PopupMenuButton<String>(
+            tooltip: '更多操作',
+            icon: const Icon(Icons.more_horiz_rounded, size: 18),
+            onSelected: (action) async {
+              switch (action) {
+                case 'copy':
+                  await Clipboard.setData(ClipboardData(text: entry.url));
+                  break;
+                case 'delete':
+                  await controller.deleteHistoryEntry(entry);
+                  break;
+              }
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(
+                value: 'copy',
+                height: 40,
+                child: Text('复制原始链接', style: TextStyle(fontSize: 12.5)),
+              ),
+              PopupMenuItem(
+                value: 'delete',
+                height: 40,
+                child: Text('删除记录', style: TextStyle(fontSize: 12.5)),
               ),
             ],
           ),
-          if (completed) ...[
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                OutlinedButton.icon(
-                  onPressed: () => controller.openHistoryFile(entry),
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size(0, 38),
-                    padding: const EdgeInsets.symmetric(horizontal: 13),
-                  ),
-                  icon: const Icon(Icons.open_in_new_rounded, size: 16),
-                  label: const Text('打开文件', style: TextStyle(fontSize: 12.5)),
-                ),
-                OutlinedButton.icon(
-                  onPressed: () => controller.openHistoryFolder(entry),
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size(0, 38),
-                    padding: const EdgeInsets.symmetric(horizontal: 13),
-                  ),
-                  icon: const Icon(Icons.folder_open_rounded, size: 16),
-                  label: const Text('打开文件夹', style: TextStyle(fontSize: 12.5)),
-                ),
-              ],
-            ),
-          ],
         ],
       ),
     );
