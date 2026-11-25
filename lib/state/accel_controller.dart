@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../core/accel_platform.dart';
 import '../core/github_accel.dart';
 import '../core/hosts_file.dart';
+import '../core/speed_bench.dart';
 
 /// GitHub 加速页面的状态。
 ///
@@ -39,6 +40,9 @@ class AccelController extends ChangeNotifier {
 
   /// 上次解析用到的源名。
   String? resolvedSourceName;
+
+  /// 直连与加速的速度对比结果；null 表示还没测。
+  SpeedComparison? comparison;
 
   /// 上次解析的耗时统计。
   int lastFetchMs = 0;
@@ -106,6 +110,7 @@ class AccelController extends ChangeNotifier {
     candidates = const [];
     failures = const {};
     resolvedSourceName = null;
+    comparison = null;
     message = '';
     try {
       final result = await resolveHosts(
@@ -120,13 +125,17 @@ class AccelController extends ChangeNotifier {
       failures = result.failures;
       lastFetchMs = result.fetchMs;
       lastVerifyMs = result.verifyMs;
-      if (result.ok) {
-        candidates = result.entries;
-        resolvedSourceName = result.sourceName;
-        message = '从 ${result.sourceName} 取到 ${result.entries.length} 个可用 IP';
-      } else {
+      if (!result.ok) {
         message = _describeFailure(result.failures);
+        return;
       }
+      candidates = result.entries;
+      resolvedSourceName = result.sourceName;
+
+      // 关键一步：不是「能连上就算好」，而是量出到底快没有。
+      // 没有提升就不该改 hosts —— 那只会让用户背上改系统文件的成本，
+      // 却换不来任何体验改善。
+      await _measure(result.entries);
     } catch (error) {
       message = '获取失败：$error';
     } finally {
@@ -134,15 +143,57 @@ class AccelController extends ChangeNotifier {
     }
   }
 
-  /// 一键加速：取列表 → 验证 → 启用。
+  /// 拿测速结果里最适合对比的那条（优先 raw.githubusercontent.com，
+  /// 那正是下载时最常走的域名）。
+  Future<void> _measure(List<HostEntry> entries) async {
+    if (entries.isEmpty) return;
+    progress = '正在对比直连与加速速度…';
+    progressDone = null;
+    progressTotal = null;
+    _safeNotify();
+
+    // 优先用测速文件所在的域名，保证两次请求打的是同一个资源。
+    const preferred = kSpeedTestHost;
+    final entry = entries.firstWhere(
+      (e) => e.host == preferred,
+      orElse: () => entries.firstWhere(
+        (e) => e.host.endsWith('githubusercontent.com'),
+        orElse: () => entries.first,
+      ),
+    );
+
+    comparison = await compareDirectVsAccelerated(
+      host: entry.host,
+      ip: entry.ip,
+      onProgress: (text) {
+        progress = text;
+        _safeNotify();
+      },
+    );
+    message = comparison!.verdict;
+    _safeNotify();
+  }
+
+  /// 一键加速：取列表 → 验证 → 测速 → 只在确实更快时写入。
   ///
-  /// 已经有可用候选时直接用它，省一次网络往返。
+  /// 「测速没有提升就不改」是硬性规则：改 hosts 是有成本的
+  /// （要提权、要改系统文件、出问题影响所有上网），
+  /// 如果只是快一点点甚至更慢，就不该动用户的系统。
   Future<void> enableAccel() async {
     if (!supported || _busy) return;
-    if (candidates.isEmpty) {
+    if (candidates.isEmpty || comparison == null) {
       await resolve();
       if (candidates.isEmpty) return;
     }
+
+    // 已经测过速：没提升就直接拒绝，不去申请提权。
+    final measured = comparison;
+    if (measured != null && !measured.worthEnabling) {
+      message = '没有明显提升，未做任何改动。${measured.verdict}';
+      _safeNotify();
+      return;
+    }
+
     _begin('正在启用加速');
     try {
       progress = Platform.isWindows

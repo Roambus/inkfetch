@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../core/github_accel.dart';
+import '../core/speed_bench.dart';
 import '../state/accel_controller.dart';
 import 'theme.dart';
 import 'widgets.dart';
@@ -60,9 +61,14 @@ class _GithubAccelPageState extends State<GithubAccelPage> {
                   if (!accel.supported) _unsupportedCard(palette),
                   if (accel.supported) ...[
                     _actionCard(context, palette, accel, narrow),
-                    const SizedBox(height: 16),
-                    if (accel.candidates.isNotEmpty && !accel.enabled)
+                    if (accel.comparison != null) ...[
+                      const SizedBox(height: 16),
+                      _speedCard(context, palette, accel, narrow),
+                    ],
+                    if (accel.candidates.isNotEmpty && !accel.enabled) ...[
+                      const SizedBox(height: 16),
                       _previewCard(palette, accel),
+                    ],
                     if (accel.activeEntries.isNotEmpty) ...[
                       const SizedBox(height: 16),
                       _activeCard(context, palette, accel),
@@ -156,13 +162,13 @@ class _GithubAccelPageState extends State<GithubAccelPage> {
                   FilledButton.icon(
                     onPressed: accel.busy ? null : accel.enableAccel,
                     icon: const Icon(Icons.north_east_rounded, size: 16),
-                    label: Text(accel.candidates.isEmpty ? '检测并开启' : '开启加速'),
+                    label: Text(_enableLabel(accel)),
                   ),
                 if (!accel.enabled)
                   OutlinedButton.icon(
                     onPressed: accel.busy ? null : accel.resolve,
                     icon: const Icon(Icons.history_rounded, size: 16),
-                    label: const Text('仅测速'),
+                    label: Text(accel.comparison == null ? '测速' : '重新测速'),
                   ),
                 if (accel.enabled)
                   OutlinedButton.icon(
@@ -183,6 +189,18 @@ class _GithubAccelPageState extends State<GithubAccelPage> {
         ),
       ),
     );
+  }
+
+  /// 按当前测速结论决定主按钮该说什么。
+  ///
+  /// 测速没用时不该给一个「开启加速」的按钮——那等于引导用户去做
+  /// 一件我们刚测出来没意义的事。
+  String _enableLabel(AccelController accel) {
+    final cmp = accel.comparison;
+    if (cmp == null) return '测速并开启';
+    if (!cmp.worthEnabling) return '没有提升，不启用';
+    if (cmp.isAvailabilityGain) return '开启加速（直连不通）';
+    return '开启加速';
   }
 
   Widget _progressBlock(AppPalette palette, AccelController accel) {
@@ -296,6 +314,227 @@ class _GithubAccelPageState extends State<GithubAccelPage> {
           ],
         ),
       ),
+    );
+  }
+
+  /// 直连 vs 加速的速度对比。
+  ///
+  /// 这一块是整个功能的说服力所在：用户要知道「开了到底有没有用」，
+  /// 而不是只有一句「已开启」。
+  Widget _speedCard(
+    BuildContext context,
+    AppPalette palette,
+    AccelController accel,
+    bool narrow,
+  ) {
+    final cmp = accel.comparison!;
+    final worth = cmp.worthEnabling;
+    final accent = worth ? palette.accent : palette.warning;
+
+    return AppCard(
+      child: Padding(
+        padding: EdgeInsets.all(narrow ? 18 : 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SectionHeader(
+              title: '速度对比',
+              trailing: Text(
+                cmp.host,
+                style: TextStyle(fontSize: 11, color: palette.faint),
+              ),
+            ),
+            const SizedBox(height: 14),
+            // 结论先说，数字再补充——用户最先想知道的是「值不值得开」。
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+              decoration: BoxDecoration(
+                color: palette.surfaceAlt,
+                borderRadius: BorderRadius.circular(8),
+                border: Border(
+                  left: BorderSide(color: accent, width: 2.5),
+                ),
+              ),
+              child: Text(
+                cmp.verdict,
+                style: TextStyle(
+                  fontSize: 13,
+                  height: 1.5,
+                  fontWeight: FontWeight.w600,
+                  color: worth ? palette.ink : palette.muted,
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            if (narrow)
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _speedRow(palette, '直连', cmp.direct, null, false),
+                  const SizedBox(height: 10),
+                  _speedRow(palette, '加速', cmp.accelerated, cmp, true),
+                ],
+              )
+            else
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: _speedRow(palette, '直连', cmp.direct, null, false),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: _speedRow(
+                      palette,
+                      '加速后',
+                      cmp.accelerated,
+                      cmp,
+                      true,
+                    ),
+                  ),
+                ],
+              ),
+            if (cmp.improvementPercent != null) ...[
+              const SizedBox(height: 14),
+              _improvementBar(palette, cmp, accent),
+            ],
+            const SizedBox(height: 12),
+            Text(
+              cmp.host == kSpeedTestHost
+                  ? '测的是 ${cmp.host} 上一个约 8KB 的真实文件，两条路各跑一次。'
+                  : '测的是 ${cmp.host} 上的真实请求，两条路各跑一次。',
+              style: TextStyle(fontSize: 11.5, color: palette.faint, height: 1.6),
+            ),
+            if (!worth) ...[
+              const SizedBox(height: 6),
+              Text(
+                '没有明显提升时不会改动你的系统设置。',
+                style: TextStyle(fontSize: 11.5, color: palette.faint),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _speedRow(
+    AppPalette palette,
+    String label,
+    SpeedSample sample,
+    SpeedComparison? cmp,
+    bool highlight,
+  ) {
+    final ok = sample.ok;
+    final color = !ok
+        ? palette.danger
+        : highlight
+        ? palette.accent
+        : palette.muted;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: palette.surfaceAlt,
+        borderRadius: BorderRadius.circular(9),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(fontSize: 11.5, color: palette.faint),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            sample.speedText,
+            style: dataStyle(size: 17, weight: FontWeight.w600, color: color),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            ok
+                ? '总计 ${sample.totalMs}ms · 握手 ${sample.handshakeMs}ms'
+                : (sample.error ?? '失败'),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 10.5, color: palette.faint, height: 1.4),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 提升幅度条：直观看出「快了多少」。
+  Widget _improvementBar(
+    AppPalette palette,
+    SpeedComparison cmp,
+    Color accent,
+  ) {
+    final value = cmp.improvementPercent!;
+    // 条形长度按提升幅度折算，±100% 封顶，负值画在左侧。
+    final ratio = (value / 100).clamp(-1.0, 1.0);
+    final positive = value >= 0;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(
+              '提升',
+              style: TextStyle(fontSize: 11.5, color: palette.faint),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              '${positive ? '+' : ''}${value.toStringAsFixed(0)}%',
+              style: dataStyle(
+                size: 15,
+                weight: FontWeight.w600,
+                color: positive ? accent : palette.danger,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 7),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final width = constraints.maxWidth;
+            final barWidth = (width * 0.5 * ratio.abs()).clamp(2.0, width * 0.5);
+            return SizedBox(
+              height: 5,
+              child: Stack(
+                children: [
+                  Container(
+                    decoration: BoxDecoration(
+                      color: palette.surfaceAlt,
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                  ),
+                  Positioned(
+                    left: positive ? width * 0.5 : width * 0.5 - barWidth,
+                    width: barWidth,
+                    top: 0,
+                    bottom: 0,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: positive ? accent : palette.danger,
+                        borderRadius: BorderRadius.circular(3),
+                      ),
+                    ),
+                  ),
+                  // 中线 = 和直连一样快
+                  Positioned(
+                    left: width * 0.5 - 0.5,
+                    width: 1,
+                    top: 0,
+                    bottom: 0,
+                    child: Container(color: palette.borderStrong),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ],
     );
   }
 
