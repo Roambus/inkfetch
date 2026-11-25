@@ -78,6 +78,8 @@ bool FlutterWindow::OnCreate() {
   // 设置、下载记录、队列与断点续传状态走注册表，避免在磁盘上留下散落文件。
   native_store_ = std::make_unique<NativeStore>(
       flutter_controller_->engine()->messenger());
+  hosts_channel_ = std::make_unique<HostsChannel>(
+      flutter_controller_->engine()->messenger());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   ApplyTitleBarTheme(GetHandle());
@@ -95,6 +97,7 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  hosts_channel_ = nullptr;
   native_store_ = nullptr;
   if (flutter_controller_) {
     flutter_controller_ = nullptr;

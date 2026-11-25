@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../state/accel_controller.dart';
 import '../state/app_controller.dart';
 import 'download_page.dart';
+import 'github_accel_page.dart';
 import 'history_page.dart';
 import 'home_page.dart';
 import 'settings_page.dart';
@@ -10,7 +12,9 @@ import 'widgets.dart';
 
 class AppShell extends StatefulWidget {
   final AppController controller;
-  const AppShell({super.key, required this.controller});
+  final AccelController accel;
+
+  const AppShell({super.key, required this.controller, required this.accel});
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -21,6 +25,8 @@ class _AppShellState extends State<AppShell> {
   bool _folderChecked = false;
 
   AppController get c => widget.controller;
+
+  AccelController get accel => widget.accel;
 
   @override
   void initState() {
@@ -99,7 +105,8 @@ class _AppShellState extends State<AppShell> {
     return switch (c.tabIndex) {
       1 => DownloadPage(controller: c),
       2 => HistoryPage(controller: c),
-      3 => SettingsPage(controller: c),
+      3 => GithubAccelPage(accel: accel),
+      4 => SettingsPage(controller: c),
       _ => HomePage(controller: c),
     };
   }
@@ -386,5 +393,6 @@ List<_NavItem> _buildNavItems(AppController c) => [
   _NavItem(0, Icons.add_link_rounded, '下载'),
   _NavItem(1, Icons.south_rounded, '任务', badge: (_) => c.incompleteTasks.length),
   _NavItem(2, Icons.history_rounded, '记录'),
-  _NavItem(3, Icons.tune_rounded, '设置'),
+  _NavItem(3, Icons.north_east_rounded, '加速'),
+  _NavItem(4, Icons.tune_rounded, '设置'),
 ];

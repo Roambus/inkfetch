@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import 'state/accel_controller.dart';
 import 'state/app_controller.dart';
 import 'ui/app_shell.dart';
 import 'ui/theme.dart';
@@ -15,7 +16,9 @@ void main() {
         FlutterError.presentError(details);
         if (kReleaseMode) debugPrint('界面异常：${details.exception}');
       };
-      runApp(InkFetchApp(controller: AppController()));
+      runApp(
+        InkFetchApp(controller: AppController(), accel: AccelController()),
+      );
     },
     (error, stack) {
       debugPrint('未捕获异常：$error');
@@ -25,7 +28,13 @@ void main() {
 
 class InkFetchApp extends StatefulWidget {
   final AppController controller;
-  const InkFetchApp({super.key, required this.controller});
+  final AccelController accel;
+
+  const InkFetchApp({
+    super.key,
+    required this.controller,
+    required this.accel,
+  });
 
   @override
   State<InkFetchApp> createState() => _InkFetchAppState();
@@ -69,7 +78,7 @@ class _InkFetchAppState extends State<InkFetchApp> {
       theme: buildAppTheme(Brightness.light),
       darkTheme: buildAppTheme(Brightness.dark),
       themeMode: mode,
-      home: AppShell(controller: widget.controller),
+      home: AppShell(controller: widget.controller, accel: widget.accel),
     );
   }
 }

@@ -7,11 +7,29 @@
 #include <vector>
 
 #include "flutter_window.h"
+#include "hosts.h"
 #include "payload.h"
 #include "utils.h"
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
+  // hosts 写入是提权子进程的工作，必须在创建窗口之前处理：
+  // 它是被 ShellExecute(runas) 以管理员身份重新拉起的同一个 exe，
+  // 只做一件事然后退出，不该启动 Flutter 引擎。
+  {
+    std::wstring hosts_src;
+    std::wstring hosts_dst;
+    std::wstring hosts_result;
+    const hosts::Mode hosts_mode = hosts::ParseMode(
+        ::GetCommandLineW(), &hosts_src, &hosts_dst, &hosts_result);
+    if (hosts_mode == hosts::Mode::Apply) {
+      return hosts::RunApply(hosts_src, hosts_dst, hosts_result);
+    }
+    if (hosts_mode == hosts::Mode::Restore) {
+      return hosts::RunRestore(hosts_dst, hosts_result);
+    }
+  }
+
   // 打包与清理是构建 / 收尾用的命令，不需要窗口和 Flutter 引擎。
   std::wstring cleanup_dir;
   std::wstring release_dir;

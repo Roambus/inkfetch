@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:inkfetch/core/models.dart';
 import 'package:inkfetch/core/scheduler.dart';
 import 'package:inkfetch/core/url_parser.dart';
+import 'package:inkfetch/state/accel_controller.dart';
 import 'package:inkfetch/state/app_controller.dart';
 import 'package:inkfetch/ui/app_shell.dart';
 import 'package:inkfetch/ui/theme.dart';
@@ -233,7 +234,7 @@ Future<void> _pump(
     MaterialApp(
       debugShowCheckedModeBanner: false,
       theme: fontTheme,
-      home: AppShell(controller: controller),
+      home: AppShell(controller: controller, accel: AccelController()),
     ),
   );
   await tester.pumpAndSettle();

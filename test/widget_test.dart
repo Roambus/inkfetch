@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:inkfetch/main.dart';
+import 'package:inkfetch/state/accel_controller.dart';
 import 'package:inkfetch/state/app_controller.dart';
 
 void main() {
   testWidgets('首页与底部导航', (tester) async {
     final controller = AppController();
-    await tester.pumpWidget(InkFetchApp(controller: controller));
+    await tester.pumpWidget(InkFetchApp(controller: controller, accel: AccelController()));
     await tester.pumpAndSettle();
 
     expect(find.text('开始下载'), findsOneWidget);
@@ -23,7 +24,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     final controller = AppController();
-    await tester.pumpWidget(InkFetchApp(controller: controller));
+    await tester.pumpWidget(InkFetchApp(controller: controller, accel: AccelController()));
     await tester.pumpAndSettle();
 
     expect(find.text('墨取'), findsOneWidget);
@@ -32,7 +33,7 @@ void main() {
 
   testWidgets('切换记录与设置页', (tester) async {
     final controller = AppController();
-    await tester.pumpWidget(InkFetchApp(controller: controller));
+    await tester.pumpWidget(InkFetchApp(controller: controller, accel: AccelController()));
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('记录').last);
@@ -48,7 +49,7 @@ void main() {
 
   testWidgets('示例链接会填入输入框', (tester) async {
     final controller = AppController();
-    await tester.pumpWidget(InkFetchApp(controller: controller));
+    await tester.pumpWidget(InkFetchApp(controller: controller, accel: AccelController()));
     await tester.pumpAndSettle();
 
     // 示例行显示的是「仓库/文件」这样的可读标签，不再直接铺 URL。
@@ -64,7 +65,7 @@ void main() {
 
   testWidgets('三类示例链接分别覆盖单文件、仓库快照与 Release 资产', (tester) async {
     final controller = AppController();
-    await tester.pumpWidget(InkFetchApp(controller: controller));
+    await tester.pumpWidget(InkFetchApp(controller: controller, accel: AccelController()));
     await tester.pumpAndSettle();
 
     // 三条示例各自代表的链接类型，用标签本身来锚定。

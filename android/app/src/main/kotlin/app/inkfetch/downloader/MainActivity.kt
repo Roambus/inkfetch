@@ -19,11 +19,16 @@ class MainActivity : FlutterActivity() {
         private const val CHANNEL = "app.inkfetch/native"
         private const val EVENT_CHANNEL = "app.inkfetch/native_events"
         private const val REQUEST_TREE = 4201
+        private const val REQUEST_VPN = 4202
     }
 
     private var pendingResult: MethodChannel.Result? = null
     private var eventSink: EventChannel.EventSink? = null
     private val ioExecutor = Executors.newSingleThreadExecutor()
+
+    /** 等待 VPN 授权期间暂存的启动参数。 */
+    private var pendingVpnRequest: Map<String, String>? = null
+    private var pendingVpnResult: MethodChannel.Result? = null
 
     @Volatile
     private var cancelCopy = false
@@ -87,6 +92,16 @@ class MainActivity : FlutterActivity() {
                         val path = call.argument<String>("path")
                         result.success(openFolder(tree, path))
                     }
+                    "accelStart" -> startAccel(call, result)
+                    "accelStop" -> {
+                        val intent = Intent(this, GithubAccelVpnService::class.java)
+                        intent.action = GithubAccelVpnService.ACTION_STOP
+                        startService(intent)
+                        result.success(true)
+                    }
+                    "accelStatus" -> {
+                        result.success(GithubAccelVpnService.isActive)
+                    }
                     else -> result.notImplemented()
                 }
             }
@@ -116,6 +131,57 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    /**
+     * 启动 GitHub 加速 VPN。
+     *
+     * Android 要求使用 VpnService 必须先经用户同意（会弹系统授权框），
+     * 所以这里分两步：没授权时先 prepare 拉起授权界面，授权后回到
+     * onActivityResult 再真正启动。已经授权过就直接启动。
+     */
+    private fun startAccel(call: io.flutter.plugin.common.MethodCall, result: MethodChannel.Result) {
+        val domainIps = HashMap<String, String>()
+        @Suppress("UNCHECKED_CAST")
+        val raw = call.argument<Map<String, String>>("domainIps")
+        raw?.forEach { (k, v) -> domainIps[k] = v }
+        if (domainIps.isEmpty()) {
+            result.error("no_ips", "没有可用的 IP 列表", null)
+            return
+        }
+        val upstream = call.argument<String>("upstream") ?: "223.5.5.5"
+
+        val intent = android.net.VpnService.prepare(this)
+        if (intent != null) {
+            // 需要用户先授权；把参数存起来，等 onActivityResult 再启动。
+            pendingVpnRequest = domainIps + mapOf(
+                GithubAccelVpnService.EXTRA_UPSTREAM to upstream
+            )
+            pendingVpnResult = result
+            try {
+                startActivityForResult(intent, REQUEST_VPN)
+            } catch (e: Exception) {
+                pendingVpnRequest = null
+                pendingVpnResult = null
+                result.error("vpn_prepare_failed", e.message ?: "无法请求 VPN 权限", null)
+            }
+            return
+        }
+        launchVpnService(domainIps, upstream)
+        result.success(true)
+    }
+
+    private fun launchVpnService(domainIps: HashMap<String, String>, upstream: String) {
+        val intent = Intent(this, GithubAccelVpnService::class.java).apply {
+            action = GithubAccelVpnService.ACTION_START
+            putExtra(GithubAccelVpnService.EXTRA_UPSTREAM, upstream)
+            putExtra(GithubAccelVpnService.EXTRA_DOMAIN_IPS, domainIps)
+        }
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+    }
+
     private fun launchDirectoryPicker(result: MethodChannel.Result) {
         if (pendingResult != null) {
             result.error("busy", "选择器已打开", null)
@@ -140,6 +206,28 @@ class MainActivity : FlutterActivity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_VPN) {
+            val request = pendingVpnRequest
+            val vpnResult = pendingVpnResult
+            pendingVpnRequest = null
+            pendingVpnResult = null
+            if (resultCode != Activity.RESULT_OK || request == null) {
+                vpnResult?.error("vpn_denied", "用户拒绝了 VPN 授权", null)
+                return
+            }
+            val upstream = request[GithubAccelVpnService.EXTRA_UPSTREAM] ?: "223.5.5.5"
+            val domainIps = HashMap<String, String>()
+            request.forEach { (k, v) ->
+                if (k != GithubAccelVpnService.EXTRA_UPSTREAM) domainIps[k] = v
+            }
+            try {
+                launchVpnService(domainIps, upstream)
+                vpnResult?.success(true)
+            } catch (e: Exception) {
+                vpnResult?.error("vpn_start_failed", e.message ?: "无法启动加速", null)
+            }
+            return
+        }
         if (requestCode != REQUEST_TREE) return
         val result = pendingResult
         pendingResult = null
