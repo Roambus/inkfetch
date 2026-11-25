@@ -98,10 +98,18 @@ jobs:
           Compress-Archive -Path "build/windows/x64/runner/Release/*" `
             -DestinationPath "dist/InkFetch-windows-x64.zip" -Force
 
+      # 单文件版：同一个 runner 二进制带 `--pack` 参数即变成打包器，
+      # 把 Release 目录压进 exe 尾部；运行时不落地，退出即清理临时目录。
+      - name: Build single-file EXE
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File scripts\build_single_exe.ps1
+
       - uses: actions/upload-artifact@v4
         with:
           name: windows-x64
-          path: dist/InkFetch-windows-x64.zip
+          path: |
+            dist/InkFetch-windows-x64.zip
+            dist/InkFetch-*-windows-x64.exe
           if-no-files-found: error
 
   release:
@@ -120,7 +128,7 @@ jobs:
       - name: Generate checksums
         run: |
           cd dist
-          sha256sum *.apk *.zip > SHA256SUMS.txt
+          sha256sum *.apk *.zip *.exe > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - uses: softprops/action-gh-release@v2

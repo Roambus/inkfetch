@@ -9,6 +9,8 @@ project(runner LANGUAGES CXX)
 add_executable(${BINARY_NAME} WIN32
   "flutter_window.cpp"
   "main.cpp"
+  "native_store.cpp"
+  "payload.cpp"
   "utils.cpp"
   "win32_window.cpp"
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
@@ -30,11 +32,24 @@ target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_BUILD=${FLUTT
 # Disable Windows macros that collide with C++ standard library functions.
 target_compile_definitions(${BINARY_NAME} PRIVATE "NOMINMAX")
 
+# 源码里有中文注释，统一按 UTF-8 编译，避免默认代码页（GBK）下告警/解析错误。
+target_compile_options(${BINARY_NAME} PRIVATE "/utf-8")
+
 # Add dependency libraries and include directories. Add any application-specific
 # dependencies here.
 target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
+# Windows 自带压缩库（Compression API），用于单文件版内嵌资源。
+target_link_libraries(${BINARY_NAME} PRIVATE "cabinet.lib")
+
+# 单文件版：引擎 DLL 在运行时才解到临时目录，因此改成延迟加载，
+# 由 payload.cpp 里的 DelayLoadHook 按绝对路径 LoadLibrary。
+target_link_options(${BINARY_NAME} PRIVATE
+  "/DELAYLOAD:flutter_windows.dll"
+  "/DELAYLOAD:dwmapi.dll"
+  "delayimp.lib")
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
 # Run the Flutter tool portions of the build. This must not be removed.
 add_dependencies(${BINARY_NAME} flutter_assemble)
+

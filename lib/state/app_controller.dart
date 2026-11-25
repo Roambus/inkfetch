@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -12,11 +11,16 @@ import '../core/mirrors.dart';
 import '../core/models.dart';
 import '../core/platform.dart';
 import '../core/probe.dart';
+import '../core/resume_store.dart';
 import '../core/storage.dart';
 import '../core/url_parser.dart';
 
 class AppController extends ChangeNotifier {
   final AppStore _store = AppStore();
+
+  /// Windows 上续传状态写注册表，其他平台仍旧写下载目录里的 `.octopart`。
+  final ResumeStore _resume = defaultResumeStore();
+  bool get _registryResume => _resume is RegistryResumeStore;
 
   AppSettings settings = AppSettings();
   List<HistoryEntry> history = [];
@@ -40,7 +44,7 @@ class AppController extends ChangeNotifier {
   /// 等待下载的链接队列，应用重启后仍会恢复。
   List<String> queuedUrls = [];
 
-  /// 磁盘上存在 `.octopart` 状态文件、可以续传的任务。
+  /// 可以续传的未完成任务，应用重启后仍会恢复。
   List<IncompleteTask> incompleteTasks = [];
 
   bool copyingToFolder = false;
@@ -298,6 +302,7 @@ class AppController extends ChangeNotifier {
       destPath: destPath,
       maxConnections: settings.maxConnections,
       verifySha: settings.verifySha,
+      resumeStore: _resume,
       onUpdate: (value) {
         snapshot = value;
         _safeNotify();
@@ -439,7 +444,7 @@ class AppController extends ChangeNotifier {
     final base = filename;
     final dot = base.lastIndexOf('.');
     var candidate = '$root${Platform.pathSeparator}$base';
-    if (await File('$candidate.octopart').exists()) {
+    if (await _hasResume(candidate)) {
       return candidate;
     }
     var counter = 1;
@@ -451,6 +456,11 @@ class AppController extends ChangeNotifier {
       counter++;
     }
     return candidate;
+  }
+
+  /// 目标路径上是否已有可续传状态：注册表实现查键，文件实现查 `.octopart`。
+  Future<bool> _hasResume(String destPath) async {
+    return await _resume.load(destPath) != null;
   }
 
   void _enqueue(String url) {
@@ -513,48 +523,38 @@ class AppController extends ChangeNotifier {
       if (dir != null && dir.isNotEmpty) roots.add(dir);
     }
     final tasks = <IncompleteTask>[];
-    for (final root in roots) {
-      final dir = Directory(root);
-      if (!await dir.exists()) continue;
+    // Windows 上状态在注册表里，直接枚举所有 `resume.*` 键；
+    // 其他平台仍旧扫下载目录里的 `.octopart` 文件。
+    final records = _registryResume
+        ? await _resume.listIncomplete()
+        : <ResumeRecord>[
+            for (final root in roots)
+              ...await _resume.listIncomplete(root: root),
+          ];
+    for (final record in records) {
       try {
-        await for (final entity in dir.list(followLinks: false)) {
-          if (entity is! File) continue;
-          final path = entity.path;
-          if (!path.endsWith('.octopart')) continue;
-          try {
-            final json =
-                jsonDecode(await entity.readAsString()) as Map<String, dynamic>;
-            final url = json['url'] as String?;
-            final total = json['total'] as int? ?? 0;
-            final chunkSize = json['chunkSize'] as int? ?? 0;
-            final chunkCount = json['chunkCount'] as int? ?? 0;
-            final completed = (json['completed'] as List<dynamic>? ?? [])
-                .map((e) => e as num)
-                .map((e) => e.toInt())
-                .toList();
-            final destPath = path.substring(
-              0,
-              path.length - '.octopart'.length,
-            );
-            if (url == null || url.isEmpty || total <= 0) continue;
-            // 下载过程中的临时状态文件也属于未完成任务，但当前任务单独展示。
-            tasks.add(
-              IncompleteTask(
-                url: url,
-                destPath: destPath,
-                filename: _basename(destPath),
-                total: total,
-                downloaded: _completedBytes(
-                  completed,
-                  chunkSize,
-                  total,
-                ),
-                chunkCount: chunkCount,
-                completedChunks: completed.length,
-              ),
-            );
-          } catch (_) {}
-        }
+        final json = record.payload;
+        final url = json['url'] as String?;
+        final total = json['total'] as int? ?? 0;
+        final chunkSize = json['chunkSize'] as int? ?? 0;
+        final chunkCount = json['chunkCount'] as int? ?? 0;
+        final completed = (json['completed'] as List<dynamic>? ?? [])
+            .map((e) => (e as num).toInt())
+            .toList();
+        if (url == null || url.isEmpty || total <= 0) continue;
+        final destPath = record.destPath;
+        // 下载过程中的临时状态文件也属于未完成任务，但当前任务单独展示。
+        tasks.add(
+          IncompleteTask(
+            url: url,
+            destPath: destPath,
+            filename: _basename(destPath),
+            total: total,
+            downloaded: _completedBytes(completed, chunkSize, total),
+            chunkCount: chunkCount,
+            completedChunks: completed.length,
+          ),
+        );
       } catch (_) {}
     }
     tasks.sort((a, b) => a.filename.compareTo(b.filename));
@@ -593,9 +593,7 @@ class AppController extends ChangeNotifier {
     try {
       await File(task.destPath).delete();
     } catch (_) {}
-    try {
-      await File('${task.destPath}.octopart').delete();
-    } catch (_) {}
+    await _resume.remove(task.destPath);
     await refreshIncompleteTasks();
     _emitNotice('已删除未完成文件');
   }
@@ -608,9 +606,7 @@ class AppController extends ChangeNotifier {
     try {
       await File(path).delete();
     } catch (_) {}
-    try {
-      await File('$path.octopart').delete();
-    } catch (_) {}
+    await _resume.remove(path);
     snapshot = null;
     await refreshIncompleteTasks();
     _emitNotice('已删除未完成文件');

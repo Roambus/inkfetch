@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 import 'dart:math' as math;
@@ -7,21 +6,30 @@ import 'dart:math' as math;
 import 'package:crypto/crypto.dart';
 
 import 'models.dart';
+import 'resume_store.dart';
 import 'scheduler.dart';
 
 const int _maxAttempts = 9;
 const int _maxSiteErrors = 4;
-const int _minTailPart = 128 * 1024;
+// 分片可以一直拆到这么小（拆完每片至少 2 倍）。结尾时连接数会从几十条
+// 掉到一两条，靠「抢尾」把最后几个分片继续摊给所有空闲连接。
+const int _minTailPart = 16 * 1024;
 const Duration _sampleInterval = Duration(milliseconds: 300);
 
 class _Part {
   final int chunk;
   final int start;
-  final int end;
+  /// 本片可写到哪个字节（含）。结尾时会被别的线程「抢尾」往下压。
+  int end;
+  /// 已写入的字节数，从 start 起算；只有持有者会改。
+  int written = 0;
 
-  const _Part(this.chunk, this.start, this.end);
+  _Part(this.chunk, this.start, this.end);
 
   int get length => end - start + 1;
+  int get remaining => end - start + 1 - written;
+  /// 还没写的那段是否够长，值得再对半切给空闲线程。
+  bool get canSplit => remaining > 2 * _minTailPart;
 }
 
 class DownloadResult {
@@ -111,6 +119,9 @@ class DownloadJob {
   final bool verifySha;
   final void Function(DownloadSnapshot snapshot) onUpdate;
 
+  /// 断点续传状态写到哪里：Windows 注入注册表实现，其他平台用默认的文件实现。
+  final ResumeStore resumeStore;
+
   final Stopwatch _clock = Stopwatch();
   HttpClient? _client;
   RandomAccessFile? _raf;
@@ -126,6 +137,8 @@ class DownloadJob {
   final List<int> _chunkDoneBytes = [];
 
   final List<_Part> _queue = [];
+  /// 正在被某个线程下载的分片，结尾时供空闲线程「抢尾」。
+  final Set<_Part> _inFlight = {};
   final List<int> _attempts = [];
 
   final List<SiteAllocation> _sites = [];
@@ -144,7 +157,7 @@ class DownloadJob {
   String? _fatalError;
   bool _verifying = false;
   bool _shaVerified = false;
-  String? _sidecarPath;
+  bool _resumeActive = false;
   Timer? _sidecarTimer;
   Future<void> _sidecarPending = Future<void>.value();
   DateTime _lastSidecarWrite = DateTime.fromMillisecondsSinceEpoch(0);
@@ -157,6 +170,7 @@ class DownloadJob {
     required this.maxConnections,
     required this.verifySha,
     required this.onUpdate,
+    this.resumeStore = const FileResumeStore(),
   });
 
   bool get isPaused => _paused;
@@ -248,7 +262,7 @@ class DownloadJob {
         final expected = report.expectedSha256;
         if (expected != null && expected.isNotEmpty) {
           if (hash.toLowerCase() != expected.toLowerCase()) {
-            await _deleteSidecar();
+            await _deleteResume();
             return _result(
               false,
               error: 'SHA-256 校验失败：镜像文件可能被篡改',
@@ -260,7 +274,7 @@ class DownloadJob {
       }
       _completedBytes = _total;
       _emit(DownloadPhase.completed, sha256: hash);
-      await _deleteSidecar();
+      await _deleteResume();
       return _result(true, sha256: hash);
     } catch (error) {
       if (_cancelled) {
@@ -289,8 +303,7 @@ class DownloadJob {
 
   Future<void> _runChunked() async {
     final file = File(destPath);
-    final sidecar = _loadSidecar(file);
-    final completed = sidecar?.$1 ?? <int>{};
+    final completed = await _loadResume();
     final resuming = completed.isNotEmpty;
     final openMode = resuming ? FileMode.append : FileMode.write;
     _raf = await file.open(mode: openMode);
@@ -301,7 +314,7 @@ class DownloadJob {
       }
     }
     await _raf!.truncate(_total);
-    _sidecarPath = '$destPath.octopart';
+    _resumeActive = true;
 
     for (var i = 0; i < _chunkCount; i++) {
       if (completed.contains(i)) {
@@ -364,12 +377,14 @@ class DownloadJob {
   ) async {
     final worker = _WorkerState(siteIndex, _sites[siteIndex]);
     while (!_abort) {
-      if (_queue.isEmpty) return;
       if (_paused) {
         await _idleWhilePaused();
         continue;
       }
-      final part = _takePart(workerCount);
+      // 队列里没有待下的分片时先试着从别人手里抢一条尾巴，
+      // 抢不到才退出——否则结尾只剩一两条连接在啃最后几百 KB。
+      final part = _queue.isNotEmpty ? _takePart(workerCount) : _stealTail();
+      if (part == null) return;
       final chunkIndex = part.chunk;
       final attempts = _attempts[chunkIndex];
       if (attempts >= _maxAttempts) {
@@ -381,9 +396,11 @@ class DownloadJob {
       worker.activeWritten = 0;
       worker.currentStart = part.start;
       _chunkMap[chunkIndex] = siteIndex + 1;
+      _inFlight.add(part);
       try {
         final written = await _downloadChunk(worker, part);
         _inflightBytes = math.max(0, _inflightBytes - written);
+        // 只计入「本次新增」的字节：part.written 里可能已经有上一轮的进度。
         _completedBytes += written;
         _sessionBytes += written;
         _chunkDoneBytes[chunkIndex] += written;
@@ -397,6 +414,9 @@ class DownloadJob {
         }
       } on _PauseSignal {
         _inflightBytes = math.max(0, _inflightBytes - worker.activeWritten);
+        // 暂停前已经落盘的字节也要记账：重试/继续时会从 part.written 接着下，
+        // 不再重下这一段，若不在这里入账，总进度会永远差一截。
+        _creditPartial(chunkIndex, siteIndex, worker.activeWritten);
         _queue.insert(0, part);
         worker.activeChunk = -1;
         worker.activeWritten = 0;
@@ -405,6 +425,8 @@ class DownloadJob {
         return;
       } catch (error) {
         _inflightBytes = math.max(0, _inflightBytes - worker.activeWritten);
+        // 同理：这次失败前写进文件的字节是有效的，要先记上。
+        _creditPartial(chunkIndex, siteIndex, worker.activeWritten);
         worker.activeChunk = -1;
         worker.activeWritten = 0;
         _attempts[chunkIndex] += 1;
@@ -428,24 +450,66 @@ class DownloadJob {
         }
         _queue.insert(0, part);
         await Future<void>.delayed(const Duration(milliseconds: 150));
+      } finally {
+        _inFlight.remove(part);
       }
+    }
+  }
+
+  /// 把「已经写进文件、但本次请求还没成功结束」的字节计入总进度。
+  /// 这些字节不会因为重试被重下（part.written 会跳过它们），
+  /// 所以必须在这里入账一次。
+  void _creditPartial(int chunkIndex, int siteIndex, int bytes) {
+    if (bytes <= 0) return;
+    _completedBytes += bytes;
+    _sessionBytes += bytes;
+    _chunkDoneBytes[chunkIndex] = math.min(
+      _chunkLength(chunkIndex),
+      _chunkDoneBytes[chunkIndex] + bytes,
+    );
+    final progress = _progressByIndex[siteIndex];
+    if (progress != null) progress.bytes += bytes;
+    if (_chunkDoneBytes[chunkIndex] >= _chunkLength(chunkIndex)) {
+      _completedChunkSet.add(chunkIndex);
     }
   }
 
   _Part _takePart(int workerCount) {
     final part = _queue.removeAt(0);
-    if (_queue.length < workerCount && part.length > 2 * _minTailPart) {
-      final mid = part.start + part.length ~/ 2;
+    if (_queue.length < workerCount && part.canSplit) {
+      final mid = part.start + part.written + (part.remaining ~/ 2);
       _queue.insert(0, _Part(part.chunk, mid, part.end));
-      return _Part(part.chunk, part.start, mid - 1);
+      // 收窄自己而不是另建一个：这样 part.written 的进度不会丢，
+      // 否则重试过的分片会被从头再写一遍、字节数也会重复统计。
+      part.end = mid - 1;
     }
     return part;
   }
 
+  /// 从正在下载的分片里挑最长的一条，把它的后半段抢过来自己下。
+  /// 结尾阶段队列是空的，但还有几十条连接闲着——让它们去抢尾巴，
+  /// 最后那点数据才能并行收口。
+  _Part? _stealTail() {
+    _Part? donor;
+    for (final part in _inFlight) {
+      if (!part.canSplit) continue;
+      if (donor == null || part.remaining > donor.remaining) donor = part;
+    }
+    if (donor == null) return null;
+    final mid = donor.start + donor.written + (donor.remaining ~/ 2);
+    final tail = _Part(donor.chunk, mid, donor.end);
+    // 持有者写到这里就会停手，把后半段彻底让出来。
+    donor.end = mid - 1;
+    return tail;
+  }
+
   Future<int> _downloadChunk(_WorkerState worker, _Part part) async {
-    final start = part.start;
+    final start = part.start + part.written;
+    // end 是活的：空闲线程可能在我们开始之后把后半段抢走，
+    // 所以只在发请求时读一次，抢尾发生在发请求之前即可。
     final end = part.end;
-    final expected = part.length;
+    final expected = end - start + 1;
+    if (expected <= 0) return 0;
     final client = _client!;
     final request = await client.getUrl(Uri.parse(worker.site.url));
     request.headers.set(HttpHeaders.rangeHeader, 'bytes=$start-$end');
@@ -487,7 +551,10 @@ class DownloadJob {
         if (_paused) throw _PauseSignal();
         if (_cancelled) throw _AbortSignal();
         if (chunk.isEmpty) continue;
-        final remain = expected - written;
+        // 每块都重新读 part.end：别的线程可能已经把尾巴抢走了。
+        // 注意 remain 是「这一段还剩多少」，written 是「本次已写多少」，
+        // 两者不能混用。
+        final remain = (part.end - start + 1) - written;
         if (remain <= 0) break;
         final take = chunk.length <= remain ? chunk : chunk.sublist(0, remain);
         final offset = start + written;
@@ -496,15 +563,18 @@ class DownloadJob {
           await _raf!.writeFrom(take);
         });
         written += take.length;
+        part.written = (start - part.start) + written;
         worker.activeWritten = written;
         _inflightBytes += take.length;
         _chunkMap[part.chunk] = worker.siteIndex + 1;
-        if (written >= expected) break;
       }
     } on TimeoutException {
       throw _ChunkFailure('读取超时，镜像连接已停滞');
     }
-    if (written != expected) {
+    // 被抢尾时提前收手是正常结束，不算数据不完整：
+    // 只要 part.end 被压下来了，少写的那部分就归抢尾的线程。
+    final truncated = part.end < end;
+    if (!truncated && written < expected) {
       throw _ChunkFailure('分片数据不完整（$written/$expected 字节）');
     }
     return written;
@@ -630,23 +700,20 @@ class DownloadJob {
     return math.min(_chunkSize, _total - start);
   }
 
-  (Set<int>, String?)? _loadSidecar(File file) {
-    final sidecar = File('${file.path}.octopart');
-    if (!sidecar.existsSync()) return null;
+  Future<Set<int>> _loadResume() async {
     try {
-      final json =
-          jsonDecode(sidecar.readAsStringSync()) as Map<String, dynamic>;
-      if (json['url'] != parsed.normalized) return null;
-      if (json['total'] != _total) return null;
-      if (json['chunkSize'] != _chunkSize) return null;
-      if (json['chunkCount'] != _chunkCount) return null;
-      final list = (json['completed'] as List<dynamic>? ?? [])
-          .map((e) => e as int)
+      final json = await resumeStore.load(destPath);
+      if (json == null) return <int>{};
+      if (json['url'] != parsed.normalized) return <int>{};
+      if (json['total'] != _total) return <int>{};
+      if (json['chunkSize'] != _chunkSize) return <int>{};
+      if (json['chunkCount'] != _chunkCount) return <int>{};
+      return (json['completed'] as List<dynamic>? ?? [])
+          .map((e) => (e as num).toInt())
           .where((index) => index >= 0 && index < _chunkCount)
           .toSet();
-      return (list, sidecar.path);
     } catch (_) {
-      return null;
+      return <int>{};
     }
   }
 
@@ -666,12 +733,11 @@ class DownloadJob {
       return;
     }
     // 只有刷盘成功后才记录分片状态，避免重启后读到“已完成但未落盘”的分片。
-    _maybeWriteSidecar(force: true);
+    _maybePersistResume(force: true);
   }
 
-  void _maybeWriteSidecar({bool force = false}) {
-    final path = _sidecarPath;
-    if (path == null) return;
+  void _maybePersistResume({bool force = false}) {
+    if (!_resumeActive) return;
     final now = DateTime.now();
     if (!force && now.difference(_lastSidecarWrite).inSeconds < 2) return;
     _lastSidecarWrite = now;
@@ -680,7 +746,7 @@ class DownloadJob {
       completed.add(index);
     }
     completed.sort();
-    final payload = jsonEncode({
+    final payload = <String, dynamic>{
       'version': 1,
       'url': parsed.normalized,
       'total': _total,
@@ -688,11 +754,11 @@ class DownloadJob {
       'chunkSize': _chunkSize,
       'chunkCount': _chunkCount,
       'completed': completed,
-    });
+    };
     try {
       _sidecarPending = _sidecarPending.then((_) async {
         try {
-          await File(path).writeAsString(payload, flush: false);
+          await resumeStore.save(destPath, payload);
         } catch (_) {}
       });
     } catch (_) {}
@@ -817,21 +883,20 @@ class DownloadJob {
     );
   }
 
-  Future<void> _deleteSidecar() async {
-    final path = _sidecarPath;
-    if (path == null) return;
+  Future<void> _deleteResume() async {
+    // 完成或校验失败都要清干净：顺带清掉上一轮留在同一个目标路径上的旧状态。
     try {
-      await File(path).delete();
+      await resumeStore.remove(destPath);
     } catch (_) {}
   }
 
-  /// 取消或失败后仍在磁盘上的部分文件与状态文件由用户显式清理。
+  /// 取消或失败后仍在磁盘上的部分文件与状态由用户显式清理。
   Future<void> _cleanupCancelled() async {
     _stopTimers();
     try {
       await _writeMutex.run(() => _raf?.flush() ?? Future<void>.value());
     } catch (_) {}
-    _maybeWriteSidecar(force: true);
+    _maybePersistResume(force: true);
     await _sidecarPending;
   }
 

@@ -484,7 +484,7 @@ class DownloadSnapshot {
   }
 }
 
-/// 磁盘上存在 `.octopart` 状态文件的未完成任务，应用重启后可继续下载。
+/// 留有断点续传状态的未完成任务，应用重启后可继续下载。
 class IncompleteTask {
   final String url;
   final String destPath;
