@@ -228,27 +228,34 @@ class NativeBridge {
 
   /// Windows：在资源管理器里定位 [path] 所指向的条目。
   ///
-  /// 这里有两个坑，都会表现成「定位到上级文件夹」：
+  /// 这里有三个坑，都会表现成「定位到上级 / 跑到别处」：
   ///
   /// 1. `/select,<路径>` 的路径必须是**要被选中的那个条目**。传父目录进去，
-  ///    资源管理器就会打开父目录的父目录、并选中那个父目录。
+  ///    资源管理器会打开父目录的父级，并选中那个父目录。
   /// 2. 如果传入的本身是**目录**，`/select` 会打开它的上一级并选中它，
   ///    看起来同样像定位错了。目录应当直接打开，不该走 /select。
+  /// 3. **引号不能自己加。** Dart 的 Process.start 会把单个参数里的双引号
+  ///    转义成 `\"`，explorer 收到 `/select,\"C:\...\"` 会当成非法路径，
+  ///    直接回退去打开「文档」目录——这就是「打开的是上一级/别的目录」
+  ///    反复出现的原因。必须把 `/select,` 与路径拆成两个参数，
+  ///    由 Windows 负责给含空格的路径加引号。
   static Future<bool> _revealInExplorer(String path) async {
     final target = revealTargetFor(path);
     if (target == null) return false;
     final type = FileSystemEntity.typeSync(target);
     try {
       if (type == FileSystemEntityType.directory) {
-        // 目标是一个目录：直接打开它，不要 /select——
-        // /select 一个目录会跳到它的父级并选中它，等于定位到上级。
+        // 目标是目录：直接打开它，不要 /select。
         await Process.start('explorer.exe', [
           target,
         ], mode: ProcessStartMode.detached);
       } else {
-        await Process.start('explorer.exe', [
-          explorerSelectArgument(target),
-        ], mode: ProcessStartMode.detached);
+        // 两个独立参数，不要拼成一个带引号的字符串。
+        await Process.start(
+          'explorer.exe',
+          explorerSelectArgs(target),
+          mode: ProcessStartMode.detached,
+        );
       }
       return true;
     } catch (_) {
@@ -274,6 +281,10 @@ String? revealTargetFor(String path) {
   return null;
 }
 
-/// explorer 的 /select 参数格式：选项与路径必须是同一个参数、
-/// 路径整体加引号，否则含空格的路径会被劈开。
-String explorerSelectArgument(String path) => '/select,"$path"';
+/// 构造 explorer 的定位参数。
+///
+/// 必须返回**两个**元素：`/select,` 和路径本身。
+/// 千万不要拼成 `/select,"<路径>"` 这样单个字符串——Dart 的
+/// Process.start 会把内层双引号转义成 `\"`，explorer 收到非法路径
+/// 后会静默回退去打开「文档」目录，表现为「打开的是别的文件夹」。
+List<String> explorerSelectArgs(String path) => ['/select,', path];

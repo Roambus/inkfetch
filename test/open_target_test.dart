@@ -24,7 +24,7 @@ void main() {
       expect(revealTargetFor(file.path), file.path);
     });
 
-    test('含空格与中文的路径原样保留，并整体加引号', () {
+    test('含空格与中文的路径原样保留', () {
       final dir = Directory.systemTemp.createTempSync('inkfetch_sel2_');
       addTearDown(() => dir.deleteSync(recursive: true));
       final file = File('${dir.path}${Platform.pathSeparator}报告 测试 文件.zip')
@@ -32,9 +32,26 @@ void main() {
 
       final target = revealTargetFor(file.path);
       expect(target, file.path);
-      expect(explorerSelectArgument(target!), '/select,"${file.path}"');
-      expect(target.contains(' '), isTrue);
+      expect(target!.contains(' '), isTrue);
       expect(target.contains('报告'), isTrue);
+    });
+
+    test('定位参数拆成两段，绝不自己加引号', () {
+      // 这是「打开的是别的文件夹」的真正成因：
+      // 写成单个 '/select,"<路径>"' 时，Dart 会把内层双引号转义成 \"，
+      // explorer 收到非法路径就静默回退去打开「文档」。
+      const path = r'C:\Users\Just\Downloads\inkfetch-reveal-test.zip';
+      final args = explorerSelectArgs(path);
+
+      expect(args, hasLength(2), reason: '必须是两个独立参数');
+      expect(args[0], '/select,');
+      expect(args[1], path, reason: '路径本身不能被加引号或转义');
+      // 任何一段都不允许自带引号（否则会被转义成 \"）。
+      for (final a in args) {
+        expect(a.contains('"'), isFalse, reason: '参数里不能出现双引号：$a');
+      }
+      // 拼起来也不该出现被转义的样子。
+      expect(args.join(' ').contains(r'\"'), isFalse);
     });
 
     test('目标是目录时原样返回目录（调用方必须直接打开，不能 /select）', () {

@@ -16,6 +16,22 @@ import 'package:flutter/material.dart';
 /// 颜色只用两族：墨（中性，从纸白到墨黑）与一点朱砂、一点松烟绿。
 /// ─────────────────────────────────────────────────────────────
 
+/// 正文与标题统一使用的无衬线族。
+///
+/// Flutter 在 Windows 上默认走 Roboto，但 Roboto 没有中文字形，
+/// 中文会逐个字回退到系统字体，导致同一段文字里粗细与字形不一致。
+/// 显式指定雅黑优先，让中英文都落在同一个族上。
+const String kSans = 'Microsoft YaHei UI';
+
+const List<String> kSansFallback = [
+  'Microsoft YaHei',
+  'Noto Sans SC',
+  'PingFang SC',
+  'Segoe UI',
+  'Roboto',
+  'sans-serif',
+];
+
 /// 等宽字体，只用于需要纵向对齐的数字与路径。
 const String kMono = 'Cascadia Mono';
 
@@ -153,6 +169,12 @@ ThemeData buildAppTheme(Brightness brightness) {
     scaffoldBackgroundColor: palette.background,
     splashFactory: InkSparkle.splashFactory,
     visualDensity: VisualDensity.standard,
+    // Flutter 默认字体是 Roboto，而 Roboto 没有中文字形。
+    // 结果是中文全靠系统逐字回退：不同字重会落到不同的中文字体上，
+    // 粗细与字形对不齐，看起来就是「字体不对、很丑」。
+    // 这里显式指定中文字族，让所有中文都来自同一个字体族。
+    fontFamily: kSans,
+    fontFamilyFallback: kSansFallback,
   );
 
   final text = base.textTheme.apply(
