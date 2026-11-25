@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../core/accel_platform.dart';
 import '../core/github_accel.dart';
 import '../core/hosts_file.dart';
+import '../core/ip_sources.dart';
 import '../core/speed_bench.dart';
 
 /// GitHub 加速页面的状态。
@@ -43,6 +44,13 @@ class AccelController extends ChangeNotifier {
 
   /// 直连与加速的速度对比结果；null 表示还没测。
   SpeedComparison? comparison;
+
+  /// 多源择优的结果（含每个候选 IP 的实测速度）。这是决定「用哪个 IP」
+  /// 和「要不要改系统」的唯一依据。
+  BestIpResult? bestIp;
+
+  /// 候选 IP 的出处统计，界面上说明「试了几个来源」。
+  int candidateCount = 0;
 
   /// 上次解析的耗时统计。
   int lastFetchMs = 0;
@@ -143,35 +151,88 @@ class AccelController extends ChangeNotifier {
     }
   }
 
-  /// 拿测速结果里最适合对比的那条（优先 raw.githubusercontent.com，
-  /// 那正是下载时最常走的域名）。
+  /// 拿测速结果里最适合对比的那条（优先 codeload，下载归档时走它）。
   Future<void> _measure(List<HostEntry> entries) async {
     if (entries.isEmpty) return;
-    progress = '正在对比直连与加速速度…';
+
+    // 选一个既能代表下载路径、又有足够候选来源的域名。
+    const preferred = kSpeedTestHost;
+    final entry = entries.firstWhere(
+      (e) => e.host == preferred,
+      orElse: () => entries.first,
+    );
+
+    progress = '正在汇总候选 IP…';
     progressDone = null;
     progressTotal = null;
     _safeNotify();
 
-    // 优先用测速文件所在的域名，保证两次请求打的是同一个资源。
-    const preferred = kSpeedTestHost;
-    final entry = entries.firstWhere(
-      (e) => e.host == preferred,
-      orElse: () => entries.firstWhere(
-        (e) => e.host.endsWith('githubusercontent.com'),
-        orElse: () => entries.first,
-      ),
-    );
-
-    comparison = await compareDirectVsAccelerated(
+    // 关键：不只信第三方列表。把系统 DNS、公共 DoH、GitHub 官方
+    // IP 段一起拉进来，全部实测，谁快用谁。
+    final candidates = await collectCandidates(
       host: entry.host,
-      ip: entry.ip,
+      listedEntries: entries,
       onProgress: (text) {
         progress = text;
         _safeNotify();
       },
     );
-    message = comparison!.verdict;
+    candidateCount = candidates.length;
+
+    if (candidates.isEmpty) {
+      message = '没有收集到任何候选 IP';
+      _safeNotify();
+      return;
+    }
+
+    bestIp = await pickFastestIp(
+      host: entry.host,
+      candidates: [
+        for (final c in candidates) (ip: c.ip, origin: c.origin),
+      ],
+      onProgress: (text, done, total) {
+        progress = text;
+        progressDone = done;
+        progressTotal = total;
+        _safeNotify();
+      },
+    );
+
+    // 让 comparison 反映「择优后」的真实提升，而不是无脑用列表 IP。
+    final top = bestIp!.best;
+    final base = bestIp!.baseline;
+    if (top != null && base != null) {
+      comparison = SpeedComparison(
+        direct: base,
+        accelerated: top.sample,
+        host: entry.host,
+        ip: top.ip,
+        improvementPercent: bestIp!.improvementPercent,
+      );
+      message = bestIp!.worthApplying
+          ? '最佳 IP 来自${top.origin}，比直连快 '
+                '${bestIp!.improvementPercent?.toStringAsFixed(0) ?? '—'}%，可以启用'
+          : '已试 ${candidates.length} 个候选，没有明显更快的，不启用';
+    } else if (top == null) {
+      message = '所有候选 IP 都不可用，无法加速';
+    } else if (base == null) {
+      message = '已选出最佳 IP（${top.origin}），但直连基准未测';
+    }
     _safeNotify();
+  }
+
+  /// 写入用的条目：把选出来的最佳 IP 应用到要写的域名上。
+  ///
+  /// 只对**测速用的那个域名**换成最佳 IP，其余域名仍用各自列表里
+  /// 验过的地址——因为测速只证明了这一个域名的优劣，不能外推。
+  List<HostEntry> _entriesWithBestIp() {
+    final top = bestIp?.best;
+    if (top == null) return candidates;
+    final host = bestIp!.host;
+    return [
+      for (final e in candidates)
+        if (e.host == host) HostEntry(e.host, top.ip) else e,
+    ];
   }
 
   /// 一键加速：取列表 → 验证 → 测速 → 只在确实更快时写入。
@@ -187,9 +248,17 @@ class AccelController extends ChangeNotifier {
     }
 
     // 已经测过速：没提升就直接拒绝，不去申请提权。
-    final measured = comparison;
-    if (measured != null && !measured.worthEnabling) {
-      message = '没有明显提升，未做任何改动。${measured.verdict}';
+    final measured = bestIp;
+    if (measured != null && !measured.worthApplying) {
+      final top = measured.best;
+      message = top == null
+          ? '没有可用的 IP，未做任何改动'
+          : '试了 ${measured.all.length} 个候选，没有明显更快的，未做任何改动';
+      _safeNotify();
+      return;
+    }
+    if (measured == null && comparison != null && !comparison!.worthEnabling) {
+      message = '没有明显提升，未做任何改动。${comparison!.verdict}';
       _safeNotify();
       return;
     }
@@ -200,7 +269,7 @@ class AccelController extends ChangeNotifier {
           ? '等待管理员授权，请在系统弹框中点「是」…'
           : '正在申请 VPN 权限…';
       _safeNotify();
-      final (ok, text) = await AccelPlatform.enable(candidates);
+      final (ok, text) = await AccelPlatform.enable(_entriesWithBestIp());
       message = text;
       if (ok) {
         enabled = true;

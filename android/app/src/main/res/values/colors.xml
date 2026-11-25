@@ -1,4 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#17181B</color>
+    <!-- 应用自己的画布色（与 lib/ui/theme.dart 的 AppPalette 保持一致）。
+         窗口底色必须用这两个值，而不是 ?android:colorBackground：
+         后者在夜间模式下是纯黑 #000000，与应用的墨池色 #0C0E10 不同。
+         页面内容比屏幕短时（空列表、短设置页），露出来的正是窗口底色，
+         于是下半屏出现一条纯黑，画面被切成两半。 -->
+    <color name="ic_launcher_background">#F0F1EC</color>
+    <color name="inkfetch_canvas_light">#F0F1EC</color>
+    <color name="inkfetch_canvas_dark">#0C0E10</color>
 </resources>

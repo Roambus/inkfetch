@@ -61,11 +61,14 @@ class _GithubAccelPageState extends State<GithubAccelPage> {
                   if (!accel.supported) _unsupportedCard(palette),
                   if (accel.supported) ...[
                     _actionCard(context, palette, accel, narrow),
-                    if (accel.comparison != null) ...[
+                    if (accel.bestIp != null) ...[
+                      const SizedBox(height: 16),
+                      _ipRankCard(context, palette, accel, narrow),
+                    ] else if (accel.comparison != null) ...[
                       const SizedBox(height: 16),
                       _speedCard(context, palette, accel, narrow),
                     ],
-                    if (accel.candidates.isNotEmpty && !accel.enabled) ...[
+                    if (accel.candidates.isNotEmpty) ...[
                       const SizedBox(height: 16),
                       _previewCard(palette, accel),
                     ],
@@ -313,6 +316,190 @@ class _GithubAccelPageState extends State<GithubAccelPage> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// 多源择优结果：每个候选 IP 的出处与实测耗时，最佳的那条高亮。
+  ///
+  /// 这一块要回答「为什么选这个 IP」，而不是只给一个结论。
+  /// 用户能亲眼看到第三方列表给的 IP 可能比系统 DNS 还慢——
+  /// 那正是之前「开了加速反而慢 50%」的原因。
+  Widget _ipRankCard(
+    BuildContext context,
+    AppPalette palette,
+    AccelController accel,
+    bool narrow,
+  ) {
+    final result = accel.bestIp!;
+    final top = result.best;
+    final base = result.baseline;
+    final worth = result.worthApplying;
+    final accent = worth ? palette.accent : palette.warning;
+    final improvement = result.improvementPercent;
+
+    // 按耗时从快到慢列出用过的候选，失败的放最后。
+    final ranked = [...result.ranked];
+    final failed = result.all.where((c) => !c.ok).toList();
+    final slowest = ranked.isEmpty ? 0 : ranked.last.totalMs;
+
+    return AppCard(
+      child: Padding(
+        padding: EdgeInsets.all(narrow ? 18 : 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SectionHeader(
+              title: '最佳 IP 选择',
+              trailing: Text(
+                '${result.all.length} 个候选',
+                style: TextStyle(fontSize: 11, color: palette.faint),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+              decoration: BoxDecoration(
+                color: palette.surfaceAlt,
+                borderRadius: BorderRadius.circular(8),
+                border: Border(left: BorderSide(color: accent, width: 2.5)),
+              ),
+              child: Text(
+                top == null
+                    ? '没有可用的候选 IP'
+                    : worth
+                    ? '选用 ${top.ip}（${top.origin}），比直连快 '
+                          '${improvement?.toStringAsFixed(0) ?? '—'}%'
+                    : '没有比直连更快的候选，不建议改动系统设置',
+                style: TextStyle(
+                  fontSize: 13,
+                  height: 1.5,
+                  fontWeight: FontWeight.w600,
+                  color: worth ? palette.ink : palette.muted,
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            // 直连基准单独一行，作为比较的锚点。
+            if (base != null)
+              _ipRow(
+                palette,
+                label: '直连（不改设置）',
+                ip: '系统 DNS',
+                ms: base.ok ? base.totalMs : null,
+                slowestMs: slowest,
+                highlight: false,
+                muted: true,
+              ),
+            for (final c in ranked)
+              _ipRow(
+                palette,
+                label: c.origin,
+                ip: c.ip,
+                ms: c.totalMs,
+                slowestMs: slowest,
+                highlight: c == top && worth,
+              ),
+            if (failed.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(
+                '另有 ${failed.length} 个候选连接失败，已排除',
+                style: TextStyle(fontSize: 11, color: palette.faint),
+              ),
+            ],
+            const SizedBox(height: 10),
+            Text(
+              '候选来自第三方列表、系统 DNS、阿里/腾讯/DNSPod DoH，以及 GitHub 官方 IP 段。'
+              '全部实测后择优，不是照抄某个列表。',
+              style: TextStyle(fontSize: 11.5, color: palette.faint, height: 1.6),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _ipRow(
+    AppPalette palette, {
+    required String label,
+    required String ip,
+    required int? ms,
+    required int slowestMs,
+    required bool highlight,
+    bool muted = false,
+  }) {
+    final color = highlight
+        ? palette.accent
+        : muted
+        ? palette.faint
+        : palette.muted;
+    // 用一条横条直观表示相对快慢（越短越快）。
+    final ratio = (ms == null || slowestMs <= 0)
+        ? 1.0
+        : (ms / slowestMs).clamp(0.0, 1.0);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 88,
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11.5,
+                color: color,
+                fontWeight: highlight ? FontWeight.w600 : FontWeight.w400,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 108,
+            child: Text(
+              ip,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: dataStyle(size: 11.5, color: color, letterSpacing: 0),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: FractionallySizedBox(
+                widthFactor: ratio.clamp(0.02, 1.0),
+                child: Container(
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: highlight ? palette.accent : palette.borderStrong,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          SizedBox(
+            width: 62,
+            child: Text(
+              ms == null ? '失败' : '${ms}ms',
+              textAlign: TextAlign.right,
+              // 「失败」是中文，等宽字体没有中文字形会渲染成方块；
+              // 只有「123ms」这种纯数字才走等宽。
+              style: ms == null
+                  ? TextStyle(fontSize: 11.5, color: palette.danger)
+                  : dataStyle(
+                      size: 11.5,
+                      weight: highlight ? FontWeight.w600 : FontWeight.w400,
+                      color: color,
+                      letterSpacing: 0,
+                    ),
+            ),
+          ),
+        ],
       ),
     );
   }

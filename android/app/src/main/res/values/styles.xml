@@ -13,6 +13,9 @@
 
          This Theme is only used starting with V2 of Flutter's Android embedding. -->
     <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
-        <item name="android:windowBackground">?android:colorBackground</item>
+        <!-- 用应用自己的画布色，不要用 ?android:colorBackground：
+             后者是纯白/纯黑，会与应用的宣纸色对不上，页面偏短时
+             下半屏会露出另一块颜色。 -->
+        <item name="android:windowBackground">@color/inkfetch_canvas_light</item>
     </style>
 </resources>

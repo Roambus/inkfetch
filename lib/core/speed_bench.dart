@@ -296,3 +296,153 @@ SpeedSample _best(List<SpeedSample> runs) {
   if (ok.isEmpty) return runs.first;
   return ok[ok.length ~/ 2];
 }
+
+/// 一个候选 IP 的实测结果。
+class CandidateSpeed {
+  final String ip;
+
+  /// 出处（系统 DNS / 阿里 DoH / GitHub 官方 / 列表…），用于界面解释。
+  final String origin;
+
+  /// 测速样本；ok=false 表示这个 IP 根本不可用。
+  final SpeedSample sample;
+
+  const CandidateSpeed({
+    required this.ip,
+    required this.origin,
+    required this.sample,
+  });
+
+  bool get ok => sample.ok;
+  int get totalMs => sample.totalMs;
+}
+
+/// 在所有候选 IP 里实测，找出真正最快的那个。
+///
+/// 这是「慢 50%」问题的正解：之前只用一个第三方列表给的 IP，
+/// 那恰好可能是最慢的（实测列表给 140.82.113.10 要 1186ms，
+/// 而腾讯 DoH 给的 20.247.166.65 只要 559ms）。
+///
+/// 做法：每个候选各跑 [samplesPerCandidate] 次取中位数，
+/// 再按最快排序。同时把「系统 DNS 直连」也作为基准一起量，
+/// 后面才能回答「加速到底有没有比现状更快」。
+Future<BestIpResult> pickFastestIp({
+  required String host,
+  required List<({String ip, String origin})> candidates,
+  String path = kSpeedTestPath,
+  Duration timeout = const Duration(seconds: 8),
+  int samplesPerCandidate = 2,
+  int concurrency = 6,
+  bool measureDirectBaseline = true,
+  void Function(String message, int done, int total)? onProgress,
+}) async {
+  // 直连基准：走系统 DNS，代表「什么都不改」时的体验。
+  SpeedSample? baseline;
+  if (measureDirectBaseline) {
+    onProgress?.call('正在测量直连基准…', 0, candidates.length + 1);
+    final runs = <SpeedSample>[];
+    for (var i = 0; i < samplesPerCandidate; i++) {
+      runs.add(await measureRealRequest(host: host, path: path, timeout: timeout));
+    }
+    baseline = _best(runs);
+  }
+
+  // 并发测速：候选可能有十几个，串行测要等很久。
+  // 限制并发数是为了避免自己的连接互相抢带宽，反而测不准。
+  final measured = List<CandidateSpeed?>.filled(candidates.length, null);
+  var done = 0;
+  var nextIndex = 0;
+  final limit = concurrency < 1 ? 1 : concurrency;
+
+  onProgress?.call('正在逐个测试候选 IP…', 0, candidates.length);
+
+  Future<void> worker() async {
+    while (true) {
+      final index = nextIndex++;
+      if (index >= candidates.length) return;
+      final candidate = candidates[index];
+      final runs = <SpeedSample>[];
+      for (var i = 0; i < samplesPerCandidate; i++) {
+        runs.add(
+          await measureRealRequest(
+            host: host,
+            path: path,
+            viaIp: candidate.ip,
+            timeout: timeout,
+          ),
+        );
+      }
+      measured[index] = CandidateSpeed(
+        ip: candidate.ip,
+        origin: candidate.origin,
+        sample: _best(runs),
+      );
+      done++;
+      onProgress?.call('正在逐个测试候选 IP…', done, candidates.length);
+    }
+  }
+
+  await Future.wait([for (var i = 0; i < limit; i++) worker()]);
+
+  final all = measured.whereType<CandidateSpeed>().toList();
+  final usable = all.where((m) => m.ok).toList()
+    ..sort((a, b) => a.totalMs.compareTo(b.totalMs));
+
+  return BestIpResult(
+    host: host,
+    baseline: baseline,
+    all: all,
+    ranked: usable,
+  );
+}
+
+/// 择优结果。
+class BestIpResult {
+  final String host;
+
+  /// 直连基准（走系统 DNS）。null 表示没测。
+  final SpeedSample? baseline;
+
+  /// 所有候选的实测结果（含失败的），用于展示与排查。
+  final List<CandidateSpeed> all;
+
+  /// 可用候选，按从快到慢排序。
+  final List<CandidateSpeed> ranked;
+
+  const BestIpResult({
+    required this.host,
+    required this.baseline,
+    required this.all,
+    required this.ranked,
+  });
+
+  /// 最快的那条；一个都没有时为 null。
+  CandidateSpeed? get best => ranked.isEmpty ? null : ranked.first;
+
+  /// 和直连相比是否值得写 hosts。
+  ///
+  /// 关键：**只跟直连基准比**。如果所有候选都不比现状快，
+  /// 就不该改动系统——那正是之前「慢 50%」的教训。
+  bool get worthApplying {
+    final top = best;
+    if (top == null) return false;
+    final base = baseline;
+    if (base == null || !base.ok) {
+      // 直连不通而候选可用 → 属于可用性提升，值得。
+      return true;
+    }
+    if (base.totalMs <= 0) return false;
+    final improvement = (base.totalMs - top.totalMs) / base.totalMs * 100;
+    return improvement >= 10.0;
+  }
+
+  /// 相对直连提升的百分比；无法计算时为 null。
+  double? get improvementPercent {
+    final top = best;
+    final base = baseline;
+    if (top == null || base == null || !base.ok || base.totalMs <= 0) {
+      return null;
+    }
+    return (base.totalMs - top.totalMs) / base.totalMs * 100;
+  }
+}

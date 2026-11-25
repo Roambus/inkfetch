@@ -2,6 +2,16 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
+/// 从一段 Text(...) 代码里取出 style: 之后的表达式文本。
+///
+/// 只是给测试做粗判用的，不追求完整解析——只要能看出
+/// 「这个 style 是不是三元表达式」就够了。
+String? _styleExpression(String block) {
+  final index = block.indexOf('style:');
+  if (index < 0) return null;
+  return block.substring(index);
+}
+
 /// 等宽字体（Cascadia Mono 子集）只有 377 个拉丁字形，**不含任何中文**。
 /// 一旦把含中文的文案交给它，整段会渲染成方块（豆腐块）。
 ///
@@ -40,7 +50,8 @@ void main() {
       for (var i = 0; i < lines.length; i++) {
         final line = lines[i];
         // 只看「纯等宽」样式的落点：dataStyle(...) 或 fontFamily: kMono。
-        if (!line.contains('dataStyle(') && !line.contains('fontFamily: kMono')) {
+        if (!line.contains('dataStyle(') &&
+            !line.contains('fontFamily: kMono')) {
           continue;
         }
         var start = i;
@@ -48,12 +59,25 @@ void main() {
           start--;
         }
         final block = lines.sublist(start, i + 1).join('\n');
+
+        // 条件分支是安全的写法：
+        //   style: cond ? TextStyle(...) : dataStyle(...)
+        // 中文那支走普通 TextStyle，只有数字才会落到等宽。
+        // 判断依据是 style: 之后出现了三元运算符。
+        final styleLine = _styleExpression(block);
+        final isConditional =
+            styleLine != null && styleLine.contains('?') &&
+            styleLine.indexOf('?') < styleLine.indexOf('dataStyle');
+
         for (final m in RegExp(r"'([^'\\]*(?:\\.[^'\\]*)*)'").allMatches(block)) {
           final literal = m.group(1)!;
-          if (cjk.hasMatch(literal)) {
-            offenders.add('${file.path}:${i + 1} -> $literal');
-            break;
+          if (!cjk.hasMatch(literal)) continue;
+          if (isConditional) {
+            // 中文落在三元的前一支，不会进 dataStyle。
+            continue;
           }
+          offenders.add('${file.path}:${i + 1} -> $literal');
+          break;
         }
       }
     }

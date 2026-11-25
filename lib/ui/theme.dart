@@ -408,6 +408,11 @@ ThemeData buildAppTheme(Brightness brightness) {
 }
 
 /// 纯色画布。界面不靠渐变与光晕取悦，靠排布与留白。
+///
+/// 注意这里必须是「撑满可用空间」的容器，而不是 ColoredBox：
+/// ColoredBox 会按子组件的尺寸绘制，一旦页面内容比屏幕矮
+/// （例如空列表、短设置页），下方就会露出窗口底色——在安卓上
+/// 表现为一条纯黑，画面被切成两半。
 class AppBackground extends StatelessWidget {
   final Widget child;
   const AppBackground({super.key, required this.child});
@@ -415,6 +420,15 @@ class AppBackground extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = AppPalette.of(context);
-    return ColoredBox(color: palette.background, child: child);
+    return SizedBox.expand(
+      child: ColoredBox(
+        color: palette.background,
+        child: Material(
+          // 透明 Material 提供 ink 与文字样式继承，本身不画背景。
+          type: MaterialType.transparency,
+          child: child,
+        ),
+      ),
+    );
   }
 }
