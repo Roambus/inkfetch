@@ -426,23 +426,26 @@ class _HomePageState extends State<HomePage> {
 
   /// 示例链接做成可点的整行，每行说明它是什么类型的链接——
   /// 比三条下划线 URL 有用得多。
+  ///
+  /// 用的是本项目自己的仓库：真能下、大小有区分，
+  /// Release 那条还带官方 digest，能顺带演示 SHA-256 校验。
   Widget _buildExamples(BuildContext context) {
     final palette = AppPalette.of(context);
     final examples = [
       (
         '单文件',
-        'rust-lang/rust · README.md',
-        'https://github.com/rust-lang/rust/blob/master/README.md',
+        'inkfetch · InkSerif-Bold.ttf',
+        'https://github.com/Roambus/inkfetch/blob/main/assets/fonts/InkSerif-Bold.ttf',
       ),
       (
         '仓库快照',
-        'git/git · master.zip',
-        'https://github.com/git/git/archive/refs/heads/master.zip',
+        'photocraft · main.zip',
+        'https://github.com/Roambus/photocraft/archive/refs/heads/main.zip',
       ),
       (
         'Release 资产',
-        'jqlang/jq · jq-1.7.1-amd64.deb',
-        'https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-1.7.1-amd64.deb',
+        'scrcpy-LiteUI · Kuaitou-v2.1.0.exe',
+        'https://github.com/Roambus/scrcpy-LiteUI/releases/download/v2.1.0/Kuaitou-v2.1.0.exe',
       ),
     ];
     return Column(

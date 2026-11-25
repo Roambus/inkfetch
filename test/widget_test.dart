@@ -51,13 +51,30 @@ void main() {
     await tester.pumpWidget(InkFetchApp(controller: controller));
     await tester.pumpAndSettle();
 
-    // 示例行显示的是“仓库/文件”这样的可读标签，不再直接铺 URL。
-    final example = find.textContaining('rust-lang/rust').first;
+    // 示例行显示的是「仓库/文件」这样的可读标签，不再直接铺 URL。
+    // 用的是本项目自己的仓库（Roambus/inkfetch）作为示例。
+    final example = find.textContaining('inkfetch').first;
     await tester.ensureVisible(example);
     await tester.pumpAndSettle();
     await tester.tap(example);
     await tester.pumpAndSettle();
-    expect(controller.urlInput, contains('rust-lang/rust'));
+    expect(controller.urlInput, contains('Roambus/inkfetch'));
     expect(controller.urlInput, startsWith('https://github.com/'));
+  });
+
+  testWidgets('三类示例链接分别覆盖单文件、仓库快照与 Release 资产', (tester) async {
+    final controller = AppController();
+    await tester.pumpWidget(InkFetchApp(controller: controller));
+    await tester.pumpAndSettle();
+
+    // 三条示例各自代表的链接类型，用标签本身来锚定。
+    expect(find.text('单文件'), findsOneWidget);
+    expect(find.text('仓库快照'), findsOneWidget);
+    expect(find.text('Release 资产'), findsOneWidget);
+
+    // 全部指向 Roambus 名下的仓库，不再混入第三方项目。
+    expect(find.textContaining('photocraft'), findsOneWidget);
+    expect(find.textContaining('scrcpy-LiteUI'), findsOneWidget);
+    expect(find.textContaining('rust-lang'), findsNothing);
   });
 }
