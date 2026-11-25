@@ -11,9 +11,17 @@ import 'scheduler.dart';
 
 const int _maxAttempts = 9;
 const int _maxSiteErrors = 4;
-// 分片可以一直拆到这么小（拆完每片至少 2 倍）。结尾时连接数会从几十条
-// 掉到一两条，靠「抢尾」把最后几个分片继续摊给所有空闲连接。
-const int _minTailPart = 16 * 1024;
+// 分片可以一直拆到这么小。结尾时连接数会从几十条掉到一两条，
+// 靠「抢尾」把最后几个分片继续摊给所有空闲连接。
+//
+// 这个值必须足够小：实测下载 82MB 文件时会卡在 99.97%（剩 25KB）。
+// 当时阈值是 16KB 且要求 remaining > 32KB，25KB 不满足，抢尾失效，
+// 最后 25KB 只能由一条连接慢慢走，而它一旦停滞就要等 35 秒流超时，
+// 于是整体就「卡住一会儿」。
+const int _minTailPart = 4 * 1024;
+// 一条分片流多久没有新字节就判定为停滞，主动放弃并让别的连接接手。
+// 原来只靠 35 秒的整体超时，尾部只剩几十 KB 时等 35 秒太久了。
+const Duration _stallTimeout = Duration(seconds: 8);
 const Duration _sampleInterval = Duration(milliseconds: 300);
 
 class _Part {
@@ -23,6 +31,10 @@ class _Part {
   int end;
   /// 已写入的字节数，从 start 起算；只有持有者会改。
   int written = 0;
+  /// 当前正在下载它的源下标（用于判断该连接是否停滞）。
+  int ownerSite = -1;
+  /// 这个分片最后一次收到新字节的时间，用于判断它是否已经停滞。
+  DateTime lastProgressAt = DateTime.now();
 
   _Part(this.chunk, this.start, this.end);
 
@@ -388,8 +400,31 @@ class DownloadJob {
       }
       // 队列里没有待下的分片时先试着从别人手里抢一条尾巴，
       // 抢不到才退出——否则结尾只剩一两条连接在啃最后几百 KB。
-      final part = _queue.isNotEmpty ? _takePart(workerCount) : _stealTail();
-      if (part == null) return;
+      //
+      // 注意「抢不到」不等于「没活了」：别的连接手里的分片正在不断变小，
+      // 过一会儿就可能变得可拆。所以这里要短暂等待再试几次，
+      // 而不是立刻 return——否则最容易在最后几十 KB 时留下一条
+      // 慢连接孤独收尾，表现为进度卡在 99.x% 不动。
+      var part = _queue.isNotEmpty ? _takePart(workerCount) : _stealTail();
+      if (part == null) {
+        var waited = 0;
+        while (!_abort && !_cancelled && waited < 40 && _queue.isEmpty) {
+          // 还有别的分片在下载，就再等一轮，给它变小的机会。
+          if (_inFlight.isEmpty) break;
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+          waited++;
+          part = _stealTail();
+          if (part != null) break;
+          // 抢不到可拆的，就看看有没有停滞的连接值得整段接管。
+          // 最后几十 KB 卡住的根源就在这里：守着它的连接已经不传数据，
+          // 但分片又小到不够拆，只能干等它超时。
+          if (waited % 4 == 0) {
+            part = _takeoverStalled(DateTime.now());
+            if (part != null) break;
+          }
+        }
+        if (part == null) return;
+      }
       final chunkIndex = part.chunk;
       final attempts = _attempts[chunkIndex];
       if (attempts >= _maxAttempts) {
@@ -400,6 +435,8 @@ class DownloadJob {
       worker.activeChunk = chunkIndex;
       worker.activeWritten = 0;
       worker.currentStart = part.start;
+      part.ownerSite = siteIndex;
+      part.lastProgressAt = DateTime.now();
       _chunkMap[chunkIndex] = siteIndex + 1;
       _inFlight.add(part);
       try {
@@ -500,12 +537,38 @@ class DownloadJob {
       if (!part.canSplit) continue;
       if (donor == null || part.remaining > donor.remaining) donor = part;
     }
-    if (donor == null) return null;
+    if (donor == null) {
+      return null;
+    }
     final mid = donor.start + donor.written + (donor.remaining ~/ 2);
     final tail = _Part(donor.chunk, mid, donor.end);
     // 持有者写到这里就会停手，把后半段彻底让出来。
     donor.end = mid - 1;
     return tail;
+  }
+
+  /// 结尾兜底：把「正在下载但迟迟没有进展」的分片整段放弃，
+  /// 交给空闲连接重新拉。
+  ///
+  /// 判断依据必须是**这个分片本身**多久没有新字节，而不是源的整体速度——
+  /// 一个源可能在为别的分片正常传输，用源速度判断会误伤，
+  /// 导致健康的分片被反复抢走重下（实测把总耗时从 16s 拖到 58s）。
+  _Part? _takeoverStalled(DateTime now) {
+    _Part? target;
+    for (final part in _inFlight) {
+      if (part.remaining <= 0) continue;
+      if (now.difference(part.lastProgressAt) < _stallTimeout) continue;
+      if (target == null || part.remaining > target.remaining) target = part;
+    }
+    if (target == null) return null;
+    final takeover = _Part(
+      target.chunk,
+      target.start + target.written,
+      target.end,
+    )..lastProgressAt = now;
+    // 让原持有者立即收手：把 end 压到已写位置之前，它会当作被抢尾正常结束。
+    target.end = target.start + target.written - 1;
+    return takeover;
   }
 
   Future<int> _downloadChunk(_WorkerState worker, _Part part) async {
@@ -551,7 +614,10 @@ class DownloadJob {
 
     var written = 0;
     try {
-      await for (final chunk in response.timeout(const Duration(seconds: 35))) {
+      // stream.timeout() 是「两次事件之间的间隔」超时，正好用来检测停滞：
+      // 尾部只剩几十 KB 时，一条堵住的连接会静默挂很久，靠 35 秒的整体
+      // 超时等不起。这里收紧到 8 秒，停滞就抛错、让别的连接接手。
+      await for (final chunk in response.timeout(_stallTimeout)) {
         if (_abort) throw _AbortSignal();
         if (_paused) throw _PauseSignal();
         if (_cancelled) throw _AbortSignal();
@@ -569,12 +635,13 @@ class DownloadJob {
         });
         written += take.length;
         part.written = (start - part.start) + written;
+        part.lastProgressAt = DateTime.now();
         worker.activeWritten = written;
         _inflightBytes += take.length;
         _chunkMap[part.chunk] = worker.siteIndex + 1;
       }
     } on TimeoutException {
-      throw _ChunkFailure('读取超时，镜像连接已停滞');
+      throw _ChunkFailure('连接停滞超过 ${_stallTimeout.inSeconds} 秒');
     }
     // 被抢尾时提前收手是正常结束，不算数据不完整：
     // 只要 part.end 被压下来了，少写的那部分就归抢尾的线程。
