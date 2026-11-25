@@ -226,17 +226,22 @@ class NativeBridge {
     }
   }
 
-  /// Windows：在资源管理器里选中 [path] 所指向的条目。
+  /// Windows：在资源管理器里定位 [path] 所指向的条目。
   ///
-  /// `explorer /select,<路径>` 的参数必须是被选中的那个路径本身；
-  /// 早先这里传的是父目录，于是选中变成了上一级，位置看起来就是错的。
+  /// 这里有两个坑，都会表现成「定位到上级文件夹」：
+  ///
+  /// 1. `/select,<路径>` 的路径必须是**要被选中的那个条目**。传父目录进去，
+  ///    资源管理器就会打开父目录的父目录、并选中那个父目录。
+  /// 2. 如果传入的本身是**目录**，`/select` 会打开它的上一级并选中它，
+  ///    看起来同样像定位错了。目录应当直接打开，不该走 /select。
   static Future<bool> _revealInExplorer(String path) async {
     final target = revealTargetFor(path);
     if (target == null) return false;
+    final type = FileSystemEntity.typeSync(target);
     try {
-      final type = FileSystemEntity.typeSync(target);
       if (type == FileSystemEntityType.directory) {
-        // 目标已不存在、退回到目录：直接打开该目录。
+        // 目标是一个目录：直接打开它，不要 /select——
+        // /select 一个目录会跳到它的父级并选中它，等于定位到上级。
         await Process.start('explorer.exe', [
           target,
         ], mode: ProcessStartMode.detached);
@@ -255,11 +260,13 @@ class NativeBridge {
 /// 决定「在资源管理器里定位」要选中的路径。
 ///
 /// 目标存在就选它自己；只有父目录存在就退回打开父目录；
-/// 都不存在返回 null。抽成顶层函数是为了让测试直接覆盖这段逻辑，
-/// 而不是复制一份到测试里。
+/// 都不存在返回 null。
 String? revealTargetFor(String path) {
   final type = FileSystemEntity.typeSync(path);
   if (type != FileSystemEntityType.notFound) return path;
+  // 目标已经不在（被手动删掉/移动）：退回它原来所在的目录。
+  // 注意返回的是**目录**，调用方要按目录处理（直接打开），
+  // 不能拿去 /select——/select 一个目录会跳到它的父级。
   final parent = File(path).parent.path;
   if (FileSystemEntity.typeSync(parent) == FileSystemEntityType.directory) {
     return parent;

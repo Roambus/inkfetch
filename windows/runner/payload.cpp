@@ -440,7 +440,10 @@ bool ExtractEmbedded(std::wstring* out_dir, std::wstring* assets_dir) {
   g_extracted_dir = dir;
 
   if (out_dir != nullptr) *out_dir = dir;
-  if (assets_dir != nullptr) *assets_dir = dir + L"\\data";
+  // DartProject 的第一个参数是「资源目录」本身，也就是 flutter_assets，
+  // 不是 data。写成 data 会让引擎找不到 FontManifest 与图标字体，
+  // 表现就是界面上所有 Material 图标变成方块。
+  if (assets_dir != nullptr) *assets_dir = dir + L"\\data\\flutter_assets";
   return true;
 }
 
