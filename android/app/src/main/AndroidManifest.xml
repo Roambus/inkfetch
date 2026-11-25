@@ -4,8 +4,6 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
-    <!-- GitHub 加速：DNS 分流 VPN -->
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED"/>
 
     <application
         android:label="墨取"
@@ -34,12 +32,15 @@
             android:name=".DownloadForegroundService"
             android:exported="false"
             android:foregroundServiceType="dataSync"/>
-        <!-- GitHub 加速：只接管 DNS 的 VpnService，需要 BIND_VPN_SERVICE 权限 -->
+        <!-- GitHub 加速：只接管 DNS 的 VpnService。
+             不声明 foregroundServiceType：VpnService 建立后系统自己会
+             显示常驻的 VPN 通知，应用不需要再起前台服务；
+             而且 Android 14+ 对 systemExempted 类型要求应用有豁免资格，
+             VPN 应用不属于该类，声明了反而可能在启动时抛异常。 -->
         <service
             android:name=".GithubAccelVpnService"
             android:exported="false"
-            android:permission="android.permission.BIND_VPN_SERVICE"
-            android:foregroundServiceType="systemExempted">
+            android:permission="android.permission.BIND_VPN_SERVICE">
             <intent-filter>
                 <action android:name="android.net.VpnService"/>
             </intent-filter>

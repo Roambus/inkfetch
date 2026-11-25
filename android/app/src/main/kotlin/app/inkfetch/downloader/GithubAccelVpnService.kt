@@ -136,8 +136,11 @@ class GithubAccelVpnService : VpnService() {
         tun = descriptor
         running.set(true)
         setState(true, "加速已开启")
+        // 不再自己 startForeground：VpnService 建立后系统会为 VPN 显示
+        // 常驻通知（这是系统行为，应用无需也不能用前台服务顶替它）。
+        // 主动 startForeground 在没有声明 foregroundServiceType 时
+        // 在 Android 14+ 会抛 MissingForegroundServiceTypeException。
         showNotification()
-        startForeground(NOTIFICATION_ID, buildNotification())
 
         worker = Thread({ pump(descriptor) }, "inkfetch-accel-dns").apply {
             isDaemon = true
@@ -372,10 +375,8 @@ class GithubAccelVpnService : VpnService() {
         }
         tun = null
         setState(false, message)
-        try {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-        } catch (_: Exception) {
-        }
+        // 只清理我们自己发的普通通知；系统的 VPN 常驻通知会在
+        // tun 关闭后由系统自动撤下，不需要（也不该）用 stopForeground。
         val manager = getSystemService(NotificationManager::class.java)
         manager?.cancel(NOTIFICATION_ID)
         stopSelf()

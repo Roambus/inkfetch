@@ -175,11 +175,10 @@ class MainActivity : FlutterActivity() {
             putExtra(GithubAccelVpnService.EXTRA_UPSTREAM, upstream)
             putExtra(GithubAccelVpnService.EXTRA_DOMAIN_IPS, domainIps)
         }
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-            startForegroundService(intent)
-        } else {
-            startService(intent)
-        }
+        // 用 startService：本服务不以前台服务方式运行（VPN 的常驻通知
+        // 由系统负责），用 startForegroundService 会在 5 秒内因为
+        // 没调用 startForeground 而被系统判为 ANR。
+        startService(intent)
     }
 
     private fun launchDirectoryPicker(result: MethodChannel.Result) {
