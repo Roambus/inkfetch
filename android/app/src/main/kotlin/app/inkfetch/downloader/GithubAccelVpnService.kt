@@ -12,6 +12,7 @@ import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.InetSocketAddress
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -50,7 +51,12 @@ class GithubAccelVpnService : VpnService() {
         private const val VPN_ADDRESS = "10.111.222.1"
         private const val VPN_MTU = 1500
         // 连续这么多次转发失败就自动关闭加速，避免用户彻底断网。
-        private const val MAX_CONSECUTIVE_FAILURES = 8
+        private const val MAX_CONSECUTIVE_FAILURES = 40
+        // DNS 记录类型
+        private const val DNS_TYPE_A = 1
+        private const val DNS_TYPE_AAAA = 28
+        // 缓存有效期：短一点更安全（IP 可能变），但足以覆盖一次页面加载。
+        private const val DNS_CACHE_TTL_MS = 60_000L
 
         @Volatile var isActive: Boolean = false
             private set
@@ -69,12 +75,20 @@ class GithubAccelVpnService : VpnService() {
     private val running = AtomicBoolean(false)
     private var worker: Thread? = null
 
-    /// 连续转发失败计数。达到上限就自动关闭 VPN。
+    /// 并发处理 DNS 查询的线程池。
     ///
-    /// 这是安全兜底：万一在某个 ROM 上转发不通，我们不能让用户的
-    /// 设备一直处于"DNS 全挂"的状态——那等于彻底断网。
-    /// 宁可自动关掉加速，让系统回到原本可用的网络。
-    private var consecutiveFailures = 0
+    /// 必须并发：浏览器会同时发起几十条查询（每个域名还分 A / AAAA），
+    /// 串行处理时一条慢查询就把整条队列堵死，表现就是浏览器打不开网页。
+    private val ioScope = Executors.newFixedThreadPool(12)
+
+    /// 写 tun 需要加锁：多条线程并发写同一个 fd 会撕裂报文。
+    private val writeLock = Any()
+
+    /// 简短的 DNS 缓存。浏览器会反复查同一批域名，缓存能显著减少等待。
+    private val dnsCache = java.util.concurrent.ConcurrentHashMap<String, CachedDns>()
+
+    /// 连续转发失败计数。达到上限就自动关闭 VPN。
+    private var consecutiveFailures = java.util.concurrent.atomic.AtomicInteger(0)
 
     /** 域名 -> 要返回的 IP（来自 Dart 侧实测结果）。 */
     private val overrides = HashMap<String, String>()
@@ -245,37 +259,112 @@ class GithubAccelVpnService : VpnService() {
 
         val query = packet.copyOfRange(udpOffset + 8, udpOffset + 8 + payloadLength)
         val name = parseQueryName(query) ?: return
+        val queryType = parseQueryType(query)
 
-        val answer = resolveLocally(name, query) ?: forwardUpstream(query)
-        if (answer == null) {
-            // 上游转发也失败：记一次失败，连续失败就自我关闭，
-            // 宁可不用加速，也不能让用户彻底断网。
-            consecutiveFailures++
-            if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-                setState(false, "DNS 转发连续失败，已自动关闭加速以免影响上网")
-                stopVpn("DNS 转发失败，已自动关闭")
+        // 命中缓存就直接回，不再走网络。
+        // 浏览器打开一个页面会重复查询同一批域名，缓存能大幅减少
+        // 等待时间，也降低上游压力。
+        val cacheKey = "$name|$queryType"
+        val cached = dnsCache[cacheKey]
+        if (cached != null && System.currentTimeMillis() - cached.at < DNS_CACHE_TTL_MS) {
+            val response = buildUdpResponse(packet, headerLength, udpOffset, cached.body)
+            try {
+                output.write(response)
+                return
+            } catch (_: Exception) {
             }
-            return
         }
-        consecutiveFailures = 0
 
-        val response = buildUdpResponse(packet, headerLength, udpOffset, answer)
-        try {
-            output.write(response)
-        } catch (_: Exception) {
+        // 关键改动：**不在这里同步等上游**。
+        // 旧实现在读包的线程里直接访问上游 DNS，一条查询慢就阻塞
+        // 后面所有查询；浏览器一次会并发几十条（每个域名还要查 A
+        // 和 AAAA），于是整条 DNS 队列被拖死——表现为「浏览器完全
+        // 打不开网页，但其它应用没事」。
+        // 现在把每条查询丢到线程池并发处理，读包线程立刻返回。
+        val request = packet.copyOfRange(0, length)
+        ioScope.execute {
+            try {
+                val answer = resolveLocally(name, query, queryType)
+                    ?: forwardUpstream(query)
+                if (answer == null) {
+                    onForwardFailed()
+                    return@execute
+                }
+                onForwardSucceeded()
+                if (cached == null) {
+                    dnsCache[cacheKey] = CachedDns(answer, System.currentTimeMillis())
+                }
+                val response = buildUdpResponse(request, headerLength, udpOffset, answer)
+                synchronized(writeLock) {
+                    output.write(response)
+                }
+            } catch (_: Exception) {
+            }
         }
     }
 
-    /** 如果命中加速表，就地构造应答。 */
-    private fun resolveLocally(name: String, query: ByteArray): ByteArray? {
-        val ip = lookup(name) ?: return null
-        val address = try {
-            InetAddress.getByName(ip).address
-        } catch (e: Exception) {
-            return null
+    private fun onForwardFailed() {
+        val failures = consecutiveFailures.incrementAndGet()
+        if (failures >= MAX_CONSECUTIVE_FAILURES) {
+            setState(false, "DNS 转发连续失败，已自动关闭加速以免影响上网")
+            stopVpn("DNS 转发失败，已自动关闭")
         }
-        if (address.size != 4) return null
-        return buildDnsAnswer(query, address)
+    }
+
+    private fun onForwardSucceeded() {
+        consecutiveFailures.set(0)
+    }
+
+    /** 读取查询的类型（1=A，28=AAAA）。 */
+    private fun parseQueryType(query: ByteArray): Int {
+        var index = 12
+        while (index < query.size) {
+            val len = query[index].toInt() and 0xFF
+            if (len == 0) {
+                index++
+                break
+            }
+            if (len and 0xC0 == 0xC0) {
+                index += 2
+                break
+            }
+            index += len + 1
+        }
+        if (index + 2 > query.size) return 1
+        return ((query[index].toInt() and 0xFF) shl 8) or
+            (query[index + 1].toInt() and 0xFF)
+    }
+
+    /**
+     * 命中加速表时本地应答。
+     *
+     * 必须按查询类型回答：查 A 给 IPv4，查 AAAA 给空应答（我们没有
+     * v6 地址）。旧实现不看类型、一律塞一条 A 记录，浏览器收到畸形
+     * 响应后会重试或直接判失败——这也是「浏览器上不了网」的成因之一。
+     */
+    private fun resolveLocally(
+        name: String,
+        query: ByteArray,
+        queryType: Int,
+    ): ByteArray? {
+        val ip = lookup(name) ?: return null
+        return when (queryType) {
+            DNS_TYPE_A -> {
+                val address = try {
+                    InetAddress.getByName(ip).address
+                } catch (e: Exception) {
+                    return null
+                }
+                if (address.size != 4) return null
+                buildDnsAnswer(query, address)
+            }
+            DNS_TYPE_AAAA -> {
+                // 我们只掌握 IPv4。回一个「没有 AAAA 记录」的合法应答，
+                // 让系统立刻走 v4，而不是干等超时。
+                buildEmptyAnswer(query)
+            }
+            else -> null
+        }
     }
 
     /** 最长后缀匹配：api.github.com 命中 github.com 的条目。 */
@@ -297,6 +386,17 @@ class GithubAccelVpnService : VpnService() {
      *   - 准备多个上游，失败就换下一个；
      *   - 每次转发都设超时，否则 DNS 卡住会拖死整个上网体验。
      */
+    /**
+     * 非 GitHub 域名：转发给上游 DNS。
+     *
+     * 策略是「主用一个、备用兜底」，而不是逐个试全部：
+     *
+     *   - 逐个试全部时，最坏要等 4 × 2.5 秒 = 10 秒，浏览器早超时了；
+     *   - 正常情况下用第一个上游就够，只有它失败才换下一个。
+     *
+     * 这个函数现在在线程池里被并发调用（每条查询一个任务），
+     * 所以不会互相阻塞。
+     */
     private fun forwardUpstream(query: ByteArray): ByteArray? {
         for (server in upstreams) {
             val answer = tryForward(query, server)
@@ -307,18 +407,16 @@ class GithubAccelVpnService : VpnService() {
 
     private fun tryForward(query: ByteArray, server: String): ByteArray? {
         return try {
+            // 每个上游用独立的短超时。1.5 秒足够一个正常的 UDP 往返，
+            // 又不至于让用户等太久；失败立刻换下一个。
             DatagramSocket().use { socket ->
-                // 关键：把我们自己的 socket 绑定到「不经过本 VPN」的底层网络。
-                //
-                // 不这么做的话，转发出去的查询会被这条 VPN 再次捕获
-                // （即使 addDisallowedApplication 排除了本应用，
-                // 某些 ROM 上仍会回环），形成自己问自己，永远没有回包。
-                // protect() 让该 socket 走真实网络，这是 VpnService 的
-                // 标准做法，也是「开加速后浏览器断网」的另一个常见原因。
+                // 把自己这个 socket 绑到真实网络：不加保护的话，
+                // 转发的查询可能被本 VPN 再次捕获，形成自己问自己，
+                // 永远没有回包。这是 VpnService 的标准做法。
                 if (!protect(socket)) {
                     return null
                 }
-                socket.soTimeout = 2500
+                socket.soTimeout = 1500
                 val target = InetAddress.getByName(server)
                 socket.send(
                     DatagramPacket(query, query.size, InetSocketAddress(target, 53))
@@ -326,6 +424,12 @@ class GithubAccelVpnService : VpnService() {
                 val buffer = ByteArray(4096)
                 val response = DatagramPacket(buffer, buffer.size)
                 socket.receive(response)
+                // 校验回包的事务 ID 与查询一致，避免串包。
+                if (response.length >= 2 &&
+                    (buffer[0] != query[0] || buffer[1] != query[1])
+                ) {
+                    return null
+                }
                 buffer.copyOfRange(0, response.length)
             }
         } catch (e: Exception) {
@@ -350,6 +454,42 @@ class GithubAccelVpnService : VpnService() {
         }
         val name = builder.toString()
         return if (name.isEmpty()) null else name
+    }
+
+    /**
+     * 构造一个「没有该类型记录」的合法 DNS 应答。
+     *
+     * 用于 AAAA 查询：我们只掌握 IPv4，与其硬塞畸形数据，
+     * 不如明确告诉系统「没有 v6 地址」，它会立刻改用 v4。
+     */
+    private fun buildEmptyAnswer(query: ByteArray): ByteArray {
+        var index = 12
+        while (index < query.size) {
+            val len = query[index].toInt() and 0xFF
+            if (len == 0) {
+                index++
+                break
+            }
+            if (len and 0xC0 == 0xC0) {
+                index += 2
+                break
+            }
+            index += len + 1
+        }
+        val questionEnd = (index + 4).coerceAtMost(query.size)
+        val question = query.copyOfRange(12, questionEnd)
+
+        val out = java.io.ByteArrayOutputStream()
+        out.write(query[0].toInt() and 0xFF)
+        out.write(query[1].toInt() and 0xFF)
+        out.write(0x81) // QR=1, RD=1
+        out.write(0x80) // RA=1, RCODE=0
+        out.write(0x00); out.write(0x01) // QDCOUNT=1
+        out.write(0x00); out.write(0x00) // ANCOUNT=0（没有这条记录）
+        out.write(0x00); out.write(0x00) // NSCOUNT
+        out.write(0x00); out.write(0x00) // ARCOUNT
+        out.write(question)
+        return out.toByteArray()
     }
 
     /** 构造一条 A 记录应答。 */
@@ -483,6 +623,13 @@ class GithubAccelVpnService : VpnService() {
         } catch (_: Exception) {
         }
         tun = null
+        dnsCache.clear()
+        // 线程池必须显式关掉，否则服务销毁后线程仍占着，
+        // 下次开启时又建一批，反复几次会耗光资源。
+        try {
+            ioScope.shutdownNow()
+        } catch (_: Exception) {
+        }
         setState(false, "加速已停止")
         super.onDestroy()
     }
@@ -524,3 +671,9 @@ class GithubAccelVpnService : VpnService() {
         manager?.notify(NOTIFICATION_ID, buildNotification())
     }
 }
+
+/// 一条缓存下来的 DNS 应答。
+///
+/// 带上时间戳而不是定时清理：查询时比对有效期即可，
+/// 免去额外的清理线程；条目量很小（几十到几百个域名）。
+data class CachedDns(val body: ByteArray, val at: Long)
