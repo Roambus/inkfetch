@@ -11,9 +11,12 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('开始下载'), findsOneWidget);
+    // 下载 / 进行中 / 历史 现在合并成一个下载区，用标签切换。
     expect(find.text('下载'), findsWidgets);
-    expect(find.text('任务'), findsWidgets);
-    expect(find.text('记录'), findsWidgets);
+    expect(find.text('进行中'), findsWidgets);
+    expect(find.text('历史'), findsWidgets);
+    // 顶级导航只剩三项。
+    expect(find.text('加速'), findsWidgets);
     expect(find.text('设置'), findsWidgets);
   });
 
@@ -31,12 +34,13 @@ void main() {
     expect(find.text('INKFETCH'), findsOneWidget);
   });
 
-  testWidgets('切换记录与设置页', (tester) async {
+  testWidgets('下载区内切换历史与设置页', (tester) async {
     final controller = AppController();
     await tester.pumpWidget(InkFetchApp(controller: controller, accel: AccelController()));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('记录').last);
+    // 「历史」现在是下载区里的标签，不再占顶级导航位。
+    await tester.tap(find.text('历史').last);
     await tester.pumpAndSettle();
     expect(find.text('还没有下载记录'), findsOneWidget);
 

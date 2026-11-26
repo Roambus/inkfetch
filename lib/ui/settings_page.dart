@@ -113,8 +113,7 @@ class SettingsPage extends StatelessWidget {
           if (c.isAndroid) ...[
             const SizedBox(height: 12),
             Text(
-              '提示：Android 建议选择一个公共文件夹（如 Download/InkFetch）。'
-              '未选择时文件保存在应用专属目录，卸载应用会一并删除。',
+              '选公共文件夹（如 Download/InkFetch）可避免卸载时丢文件。',
               style: TextStyle(
                 fontSize: 11.5,
                 color: palette.muted,

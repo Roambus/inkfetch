@@ -2,10 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../state/accel_controller.dart';
 import '../state/app_controller.dart';
-import 'download_page.dart';
+import 'downloads_hub.dart';
 import 'github_accel_page.dart';
-import 'history_page.dart';
-import 'home_page.dart';
 import 'settings_page.dart';
 import 'theme.dart';
 import 'widgets.dart';
@@ -103,11 +101,11 @@ class _AppShellState extends State<AppShell> {
   /// 只构建当前页，避免常驻四页产生大量无效语义节点。
   Widget _content() {
     return switch (c.tabIndex) {
-      1 => DownloadPage(controller: c),
-      2 => HistoryPage(controller: c),
-      3 => GithubAccelPage(accel: accel),
-      4 => SettingsPage(controller: c),
-      _ => HomePage(controller: c),
+      // 下载 / 进行中 / 历史 都在 DownloadsHub 里用标签切换，
+      // 不再占用三个顶级导航位。
+      1 => GithubAccelPage(accel: accel),
+      2 => SettingsPage(controller: c),
+      _ => DownloadsHub(controller: c, accel: accel),
     };
   }
 }
@@ -390,9 +388,12 @@ class _NavItem {
 
 /// 导航项由 shell 在使用处补上 controller 的计数。
 List<_NavItem> _buildNavItems(AppController c) => [
-  _NavItem(0, Icons.add_link_rounded, '下载'),
-  _NavItem(1, Icons.south_rounded, '任务', badge: (_) => c.incompleteTasks.length),
-  _NavItem(2, Icons.history_rounded, '记录'),
-  _NavItem(3, Icons.north_east_rounded, '加速'),
-  _NavItem(4, Icons.tune_rounded, '设置'),
+  _NavItem(
+    0,
+    Icons.add_link_rounded,
+    '下载',
+    badge: (_) => c.incompleteTasks.length,
+  ),
+  _NavItem(1, Icons.north_east_rounded, '加速'),
+  _NavItem(2, Icons.tune_rounded, '设置'),
 ];

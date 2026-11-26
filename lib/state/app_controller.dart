@@ -27,6 +27,13 @@ class AppController extends ChangeNotifier {
   bool initialized = false;
   int tabIndex = 0;
 
+  /// 下载区内部的三个分段：0 下载、1 进行中、2 历史。
+  ///
+  /// 「下载 / 任务 / 记录」原本是三个顶级页，实际是一件事的三个阶段，
+  /// 现在收进同一个页面用标签切换，这个字段记住当前看的是哪一段。
+  int downloadSection = 0;
+
+
   String urlInput = '';
   ParsedUrl? parsed;
   ProbeReport? report;
@@ -135,6 +142,14 @@ class AppController extends ChangeNotifier {
   void setTab(int index) {
     if (tabIndex == index) return;
     tabIndex = index;
+    _safeNotify();
+  }
+
+  /// 切换下载区内的分段（下载 / 进行中 / 历史）。
+  void setDownloadSection(int index) {
+    final clamped = index.clamp(0, 2);
+    if (downloadSection == clamped) return;
+    downloadSection = clamped;
     _safeNotify();
   }
 
@@ -272,7 +287,9 @@ class AppController extends ChangeNotifier {
       savedUri: null,
       progress: 0,
     );
-    tabIndex = 1;
+    // 开始下载就切到「进行中」那一段。三页合并后不再跳顶级导航，
+    // 只在同一个页面内换标签。
+    downloadSection = 1;
     _safeNotify();
 
     String destPath;

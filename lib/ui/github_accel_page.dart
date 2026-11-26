@@ -81,8 +81,6 @@ class _GithubAccelPageState extends State<GithubAccelPage> {
                       const SizedBox(height: 16),
                       _activeCard(context, palette, accel),
                     ],
-                    const SizedBox(height: 16),
-                    _howItWorks(palette, accel),
                   ],
                 ],
               ),
@@ -209,12 +207,14 @@ class _GithubAccelPageState extends State<GithubAccelPage> {
   ///
   /// 测速没用时不该给一个「开启加速」的按钮——那等于引导用户去做
   /// 一件我们刚测出来没意义的事。
+  /// 主按钮文案。
+  ///
+  /// 测速结果只用来提示「哪条更快」，不决定按钮能不能点。
+  /// 用户反馈过：没测出更快的 IP 就显示「不启用」，连中转都用不了——
+  /// 那等于让一次可能不准的测速替用户做决定。
   String _enableLabel(AccelController accel) {
-    final cmp = accel.comparison;
-    if (cmp == null) return '测速并开启';
-    if (!cmp.worthEnabling) return '没有提升，不启用';
-    if (cmp.isAvailabilityGain) return '开启加速（直连不通）';
-    return '开启加速';
+    if (accel.comparison == null && accel.bestIp == null) return '测速并开启';
+    return accel.enabled ? '已开启' : '启用加速';
   }
 
   Widget _progressBlock(AppPalette palette, AccelController accel) {
@@ -641,7 +641,8 @@ class _GithubAccelPageState extends State<GithubAccelPage> {
                     : worth
                     ? '选用 ${top.ip}（${top.origin}），比直连快 '
                           '${improvement?.toStringAsFixed(0) ?? '—'}%'
-                    : '没有比直连更快的候选，不建议改动系统设置',
+                    // 测速只作参考：没测出更快的也照常允许启用。
+                    : '${top.ip}（${top.origin}）最快，与直连相近',
                 style: TextStyle(
                   fontSize: 13,
                   height: 1.5,
@@ -859,17 +860,10 @@ class _GithubAccelPageState extends State<GithubAccelPage> {
             const SizedBox(height: 12),
             Text(
               cmp.host == kSpeedTestHost
-                  ? '测的是 ${cmp.host} 上一个约 8KB 的真实文件，两条路各跑一次。'
-                  : '测的是 ${cmp.host} 上的真实请求，两条路各跑一次。',
+                  ? '测速样本：${cmp.host} 上一个约 8KB 的文件'
+                  : '测速样本：${cmp.host} 上的一个请求',
               style: TextStyle(fontSize: 11.5, color: palette.faint, height: 1.6),
             ),
-            if (!worth) ...[
-              const SizedBox(height: 6),
-              Text(
-                '没有明显提升时不会改动你的系统设置。',
-                style: TextStyle(fontSize: 11.5, color: palette.faint),
-              ),
-            ],
           ],
         ),
       ),
@@ -1113,102 +1107,6 @@ class _GithubAccelPageState extends State<GithubAccelPage> {
               ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _howItWorks(AppPalette palette, AccelController accel) {
-    final isWindows = !Platform.isAndroid;
-    return AppCard(
-      child: Padding(
-        padding: const EdgeInsets.all(22),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SectionHeader(title: '怎么做的'),
-            const SizedBox(height: 12),
-            if (isWindows) ...[
-              _step(
-                palette,
-                '取列表',
-                '先取 GitHub-IP-hosts；取不到或一条都验不过，再自动改用 GitHub520。',
-              ),
-              _step(
-                palette,
-                '验真',
-                '每个 IP 都用「连接该 IP + 用域名做证书校验」验证。'
-                    '握手不通过的一律不写——写错 IP 比不写更糟。',
-              ),
-              _step(
-                palette,
-                '写 hosts',
-                '按域名保留最快的一条，写进系统 hosts 的标记区块里，'
-                    '需要时弹一次管理员授权。你原有的条目不会被动到。',
-              ),
-              _step(
-                palette,
-                '可还原',
-                '关闭加速时只移除自己那一段；写入前也留了备份。',
-                last: true,
-              ),
-            ] else ...[
-              _step(
-                palette,
-                '取列表并验真',
-                '同样先取 GitHub-IP-hosts，失败再用 GitHub520，'
-                    '并逐个做证书校验。',
-              ),
-              _step(
-                palette,
-                '只接管 DNS',
-                '安卓不允许普通应用改 hosts，所以起一个 VpnService，'
-                    '只把系统 DNS 查询接过来，GitHub 域名解析成验过的 IP。',
-              ),
-              _step(
-                palette,
-                '不转发流量',
-                '不代理任何正文流量、不加默认路由，其它应用的上网行为完全不受影响。',
-              ),
-              _step(
-                palette,
-                '随时可关',
-                '关闭即撤销该 VPN，系统 DNS 立即回到原来的设置。',
-                last: true,
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _step(AppPalette palette, String title, String body, {bool last = false}) {
-    return Padding(
-      padding: EdgeInsets.only(bottom: last ? 0 : 14),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 3),
-            child: SizedBox(
-              width: 62,
-              child: Text(
-                title,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: palette.ink,
-                ),
-              ),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              body,
-              style: TextStyle(fontSize: 12, height: 1.65, color: palette.muted),
-            ),
-          ),
-        ],
       ),
     );
   }

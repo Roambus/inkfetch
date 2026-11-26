@@ -315,11 +315,30 @@ class AccelController extends ChangeNotifier {
     ];
   }
 
-  /// 一键加速：取列表 → 验证 → 测速 → 只在确实更快时写入。
+  /// 两条路都没达到「明显提升」时的兜底选择。
   ///
-  /// 「测速没有提升就不改」是硬性规则：改 hosts 是有成本的
-  /// （要提权、要改系统文件、出问题影响所有上网），
-  /// 如果只是快一点点甚至更慢，就不该动用户的系统。
+  /// 原则：只要某条路**技术上可用**（能连上、能生效），就允许启用。
+  /// 是否值得启用交给用户判断，我们不再替他否决。
+  ///
+  /// 优先级：中转 > hosts。理由是中转只改当前用户的代理配置、
+  /// 不碰系统文件、随时可关，代价比改 hosts 小。
+  AccelApproach _fallbackApproach() {
+    if (relay?.relayReachable ?? false) return AccelApproach.relay;
+    if (bestIp?.best != null) return AccelApproach.hosts;
+    // 候选 IP 存在但都没测通时，仍允许写 hosts 试试
+    // （可能是测速目标被限流，而实际域名可用）。
+    if (candidates.isNotEmpty) return AccelApproach.hosts;
+    return AccelApproach.none;
+  }
+
+  /// 启用加速。
+  ///
+  /// 测速只作为「参考信息」，**不再阻止用户启用**。
+  ///
+  /// 之前的实现里，如果两条路都没跑出明显提升，这里会直接 return，
+  /// 结果用户连中转都点不了——而中转本身可能正是当时最合适的选择，
+  /// 只是我们的测速没测出来（网络抖动、测速目标单一等）。
+  /// 现在改成：测完把结论摆出来，用哪条、要不要用，由用户决定。
   Future<void> enableAccel() async {
     if (!supported || _busy) return;
     // 两条路都要评估过才能选：用户可能是先手动点了「中转」。
@@ -328,9 +347,14 @@ class AccelController extends ChangeNotifier {
       if (candidates.isEmpty && relay == null) return;
     }
 
-    final choice = effectiveApproach;
+    // 用户显式选过就用它；没选过（auto）则挑一条可用的，
+    // 两条都不可用时也仍然允许尝试——留给用户判断。
+    var choice = effectiveApproach;
     if (choice == AccelApproach.none) {
-      message = '两条路都没有明显提升，未做任何改动';
+      choice = _fallbackApproach();
+    }
+    if (choice == AccelApproach.none) {
+      message = '没有可用的加速路径，请稍后重测';
       _safeNotify();
       return;
     }

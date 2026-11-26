@@ -478,60 +478,33 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-/// 首页收尾：三段式说明「链接怎么进来、怎么分片、怎么落地」。
-/// 只在没有探测结果时显示，避免占满用过的人的空间。
+/// 首页收尾的一行说明。
+///
+/// 旧版这里是「解析 / 分片 / 落地」三段解释性文字，读起来像产品文档，
+/// 而且讲的东西界面上本来就看得见。现在压成一行，只留用户真正需要
+/// 知道的一件事：下完会校验。
 class _HowItWorks extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = AppPalette.of(context);
-    final steps = [
-      (
-        '解析',
-        '识别 GitHub 文件、Release、仓库归档或 Gist 链接，取出文件名与官方校验值。',
-      ),
-      (
-        '分片',
-        '先测常用镜像，按实测速度把连接分给快的源；每个源的首段内容会互相校验，'
-            '拼错页面的源直接被排除。',
-      ),
-      (
-        '落地',
-        '分片同时写入同一个文件，断点状态记在系统里；完成后算 SHA-256 与官方 digest 比对。',
-      ),
-    ];
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Row(
       children: [
-        for (var i = 0; i < steps.length; i++) ...[
-          if (i > 0) const SizedBox(height: 14),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SizedBox(
-                width: 52,
-                child: Text(
-                  steps[i].$1,
-                  style: displayStyle(
-                    size: 12.5,
-                    weight: FontWeight.w600,
-                    color: palette.faint,
-                    letterSpacing: 1.5,
-                  ),
-                ),
-              ),
-              Expanded(
-                child: Text(
-                  steps[i].$2,
-                  style: TextStyle(
-                    fontSize: 11.5,
-                    color: palette.muted,
-                    height: 1.75,
-                  ),
-                ),
-              ),
-            ],
+        Icon(
+          Icons.info_outline_rounded,
+          size: 14,
+          color: palette.faint,
+        ),
+        const SizedBox(width: 7),
+        Expanded(
+          child: Text(
+            '下载完成后会算 SHA-256，与官方校验值比对。',
+            style: TextStyle(
+              fontSize: 11.5,
+              color: palette.faint,
+              height: 1.6,
+            ),
           ),
-        ],
+        ),
       ],
     );
   }
