@@ -1,0 +1,620 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>墨取 · GitHub 下载器</title>
+<meta name="description" content="墨取把 GitHub 的链接变成文件。多镜像并发、断点续传、SHA-256 校验，Windows 单文件 EXE 与 Android APK。">
+<link rel="icon" href="assets/cat-ink.png">
+<style>
+/* ── 字体 ──────────────────────────────────────────────────
+   标题用系统宋体族：这是产品本身的语气来源，也让页面与
+   应用界面是同一个东西。正文走系统无衬线。数字独立用等宽，
+   只用于需要纵向对齐的地方。 */
+@font-face{
+  font-family:'InkMono';
+  src:url('assets/InkMono-Regular.ttf') format('truetype');
+  font-weight:400;font-display:swap;
+}
+:root{
+  /* 墨阶：从最深的墨到最淡的纸影，只有这些，不引入第三种色系 */
+  --ink-0:#0E0F10;
+  --ink-1:#22252A;
+  --ink-2:#4A4E52;
+  --ink-3:#7C8079;
+  --ink-4:#A9ADA3;
+  --paper:#F4F2EC;
+  --paper-edge:#E4E1D6;
+  --paper-card:#FBFAF6;
+  /* 一点松烟绿（与应用的 accent 同源），只用于「正在发生」 */
+  --pine:#1C5B4A;
+  --cinnabar:#B23A2C;
+  /* 分片调色板：与应用里的分片热力图完全一致 */
+  --s0:#1C5B4A; --s1:#3F6E62; --s2:#6E7F5A;
+  --s3:#8A6A46; --s4:#5B6280; --s5:#7C5560;
+
+  --serif:'Songti SC','STSong','Source Han Serif SC','Noto Serif CJK SC',
+          'SimSun',serif;
+  --sans:'Microsoft YaHei UI','Microsoft YaHei','Noto Sans SC',
+         'PingFang SC',sans-serif;
+  --mono:'InkMono','Cascadia Mono',Consolas,monospace;
+
+  --ease:cubic-bezier(.2,.7,.3,1);
+}
+
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%;overflow-x:hidden}
+body{
+  background:var(--paper);
+  color:var(--ink-1);
+  font-family:var(--sans);
+  font-size:16px;
+  line-height:1.75;
+  -webkit-font-smoothing:antialiased;
+  overflow-x:hidden;
+  /* 长串（哈希、URL）不能把页面撑宽 */
+  overflow-wrap:break-word;
+}
+/* 纸的肌理：极淡的噪点，只在放大时可见，避免纯色板的塑料感 */
+body::before{
+  content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
+  opacity:.35;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.045'/%3E%3C/svg%3E");
+}
+.wrap{position:relative;z-index:1}
+img{max-width:100%;display:block}
+a{color:inherit;text-decoration:none}
+:focus-visible{outline:2px solid var(--pine);outline-offset:3px;border-radius:2px}
+
+/* ── 框架 ─────────────────────────────────────────────────
+   内容宽度克制在 1080，正文行宽不超过 58 个汉字。 */
+.frame{width:min(1080px,calc(100% - 48px));margin-inline:auto}
+
+/* ── 顶栏 ─────────────────────────────────────────────── */
+.top{
+  padding:22px 0;
+  display:flex;align-items:center;gap:14px;
+  border-bottom:1px solid var(--paper-edge);
+}
+.brand{display:flex;align-items:center;gap:11px}
+.seal{
+  width:34px;height:34px;border-radius:5px;overflow:hidden;
+  background:var(--paper-card);
+  box-shadow:inset 0 0 0 1px rgba(14,15,16,.07);
+  flex:0 0 auto;
+}
+.brand-name{
+  font-family:var(--serif);font-size:19px;font-weight:700;
+  letter-spacing:.16em;color:var(--ink-0);line-height:1.2;
+}
+.brand-latin{
+  font-family:var(--mono);font-size:9px;letter-spacing:.34em;
+  color:var(--ink-4);margin-top:2px;
+}
+.top-nav{margin-left:auto;display:flex;gap:22px;align-items:center}
+.top-nav a{
+  font-size:13px;color:var(--ink-2);
+  transition:color .18s var(--ease);
+}
+.top-nav a:hover{color:var(--ink-0)}
+
+/* ── 主视觉 ──────────────────────────────────────────────
+   与下面各节左对齐到同一条墨线上。右侧放那只水墨猫，
+   让它比左栏略大一点、略微出血，形成不对称的重心。 */
+.hero{
+  padding:clamp(44px,6vw,80px) 0 clamp(32px,4vw,52px);
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(0,.82fr);
+  gap:clamp(24px,4vw,56px);
+  align-items:center;
+}
+.hero-copy{max-width:540px}
+.eyebrow{
+  font-size:12px;color:var(--ink-3);letter-spacing:.06em;
+  margin-bottom:20px;
+}
+.eyebrow b{color:var(--pine);font-weight:600}
+h1{
+  font-family:var(--serif);
+  font-size:clamp(36px,4.6vw,58px);
+  font-weight:700;line-height:1.14;letter-spacing:.01em;
+  color:var(--ink-0);
+  margin-bottom:20px;
+  /* 中文标题按字断行会把词拆开，这里禁掉自动压缩，交给容器宽度决定 */
+  word-break:keep-all;
+}
+/* 标题里第二行下沉一级墨色与字号，形成层次；不做「一个词变色」那种套路 */
+h1 span{display:block;color:var(--ink-2);font-size:.56em;margin-top:.3em;letter-spacing:.04em}
+.lede{
+  font-size:15.5px;line-height:1.85;color:var(--ink-2);
+  max-width:34ch;
+}
+.hero-actions{
+  margin-top:34px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;
+}
+.btn{
+  display:inline-flex;align-items:center;gap:9px;
+  padding:12px 20px;border-radius:8px;
+  font-size:14px;font-weight:600;
+  border:1px solid transparent;
+  transition:transform .18s var(--ease),background .18s var(--ease),
+             border-color .18s var(--ease),color .18s var(--ease);
+}
+.btn-primary{background:var(--ink-0);color:var(--paper)}
+.btn-primary:hover{background:var(--pine);transform:translateY(-1px)}
+.btn-ghost{background:transparent;color:var(--ink-1);border-color:var(--paper-edge)}
+.btn-ghost:hover{border-color:var(--ink-3);transform:translateY(-1px)}
+.btn-note{font-size:12px;color:var(--ink-4);margin-left:2px}
+
+.hero-art{position:relative;display:flex;justify-content:center}
+.hero-art img{
+  width:min(100%,430px);
+  filter:contrast(1.04);
+  /* 轻微放大裁掉图片四周的纸白，让猫本身占满画框；
+     再叠一层径向遮罩把边缘化到纸里，避免出现方形的图框 */
+  transform:scale(1.12);
+  -webkit-mask-image:radial-gradient(ellipse at 50% 48%,#000 62%,transparent 76%);
+          mask-image:radial-gradient(ellipse at 50% 48%,#000 62%,transparent 76%);
+}
+
+/* ── 分片带：全页视觉脊梁 ────────────────────────────────
+   用应用里真实的分片调色板生成，代表「一个文件被切成很多段
+   同时下载」。它不是装饰图，是这个产品的工作方式。
+   做得密一点、窄一点，让它读起来像数据，而不是一串色块。 */
+.shard-band{
+  display:flex;gap:2px;height:26px;margin:0 0 clamp(40px,6vw,64px);
+  border-radius:3px;overflow:hidden;
+}
+.shard-band i{
+  flex:1;border-radius:1px;
+  transform-origin:bottom;
+  animation:shardIn .7s var(--ease) backwards;
+}
+@keyframes shardIn{from{transform:scaleY(.15);opacity:0}to{transform:scaleY(1);opacity:1}}
+/* 进行中的分片轻微呼吸，暗示「还在写」 */
+@keyframes breathe{0%,100%{transform:scaleY(1)}50%{transform:scaleY(.62)}}
+
+/* ── 数据行 ─────────────────────────────────────────────── */
+.facts{
+  display:grid;grid-template-columns:repeat(4,1fr);
+  gap:1px;background:var(--paper-edge);
+  border-block:1px solid var(--paper-edge);
+  margin-bottom:clamp(48px,7vw,80px);
+}
+.fact{background:var(--paper);padding:22px 4px 22px 0}
+.fact-num{
+  font-family:var(--mono);font-size:clamp(22px,3vw,30px);
+  font-weight:400;color:var(--ink-0);line-height:1.1;
+  letter-spacing:-.02em;
+}
+.fact-label{font-size:12px;color:var(--ink-3);margin-top:6px}
+
+/* ── 分节 ───────────────────────────────────────────────── */
+section{padding-block:clamp(44px,7vw,84px)}
+.sec-head{
+  display:flex;align-items:baseline;gap:16px;
+  margin-bottom:clamp(26px,4vw,40px);
+  padding-bottom:14px;border-bottom:1px solid var(--paper-edge);
+}
+h2{
+  font-family:var(--serif);font-size:clamp(24px,3.4vw,32px);
+  font-weight:700;color:var(--ink-0);letter-spacing:.02em;
+}
+.sec-head p{font-size:13.5px;color:var(--ink-3);margin-left:auto;text-align:right}
+
+/* ── 下载卡片 ───────────────────────────────────────────── */
+.dl-grid{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(268px,1fr));
+  gap:16px;
+}
+.dl{
+  background:var(--paper-card);
+  border:1px solid var(--paper-edge);
+  border-radius:12px;padding:24px;
+  display:flex;flex-direction:column;
+  transition:border-color .2s var(--ease),transform .2s var(--ease);
+}
+.dl:hover{border-color:var(--ink-4);transform:translateY(-2px)}
+.dl-top{display:flex;align-items:flex-start;gap:12px;margin-bottom:16px}
+.dl-plat{font-size:15px;font-weight:700;color:var(--ink-0);letter-spacing:.01em}
+.dl-meta{
+  font-family:var(--mono);font-size:11px;color:var(--ink-4);
+  margin-top:3px;letter-spacing:.02em;
+}
+.dl-desc{font-size:13px;color:var(--ink-2);line-height:1.7;margin-bottom:20px;flex:1}
+.dl-btn{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:11px 16px;border-radius:8px;
+  background:var(--ink-0);color:var(--paper);
+  font-size:13.5px;font-weight:600;
+  transition:background .18s var(--ease);
+}
+.dl-btn:hover{background:var(--pine)}
+.dl-btn span{font-family:var(--mono);font-size:11.5px;opacity:.65}
+.dl-alt{
+  margin-top:10px;font-size:12px;color:var(--ink-3);
+  display:flex;justify-content:space-between;gap:10px;
+}
+.dl-alt a{color:var(--ink-2);border-bottom:1px solid var(--paper-edge);transition:border-color .18s}
+.dl-alt a:hover{border-color:var(--ink-2)}
+.dl-hash{
+  font-family:var(--mono);font-size:10.5px;color:var(--ink-4);
+  margin-top:12px;padding-top:11px;border-top:1px dashed var(--paper-edge);
+  line-height:1.5;display:flex;gap:8px;align-items:baseline;
+  background:none;border-left:0;border-right:0;border-bottom:0;
+  cursor:pointer;text-align:left;width:100%;font-family:var(--mono);
+  transition:color .18s var(--ease);
+}
+.dl-hash:hover{color:var(--ink-2)}
+.dl-hash span{color:var(--ink-3);flex:0 0 auto}
+.dl-hash em{
+  margin-left:auto;font-style:normal;font-size:10px;
+  color:var(--ink-3);border-bottom:1px solid var(--paper-edge);
+}
+
+/* Android 的两个包收在一张卡里，避免堆成三张几乎一样的卡 */
+.dl-sub{display:flex;gap:8px;flex-wrap:wrap}
+.dl-sub a{
+  flex:1;min-width:110px;text-align:center;
+  padding:9px 10px;border-radius:7px;
+  border:1px solid var(--paper-edge);font-size:12.5px;color:var(--ink-1);
+  transition:border-color .18s var(--ease),background .18s var(--ease);
+}
+.dl-sub a:hover{border-color:var(--ink-3);background:var(--paper)}
+.dl-sub small{display:block;font-family:var(--mono);font-size:10px;color:var(--ink-4);margin-top:2px}
+
+/* ── 特性 ─────────────────────────────────────────────────
+   三列 × 两行，正好六个，不留空格子。用细线分隔而不是卡片：
+   六个同样的圆角卡片是最典型的模板感来源。 */
+.feat-grid{
+  display:grid;grid-template-columns:repeat(3,1fr);
+  gap:1px;background:var(--paper-edge);
+}
+.feat{background:var(--paper);padding:26px 24px 26px 0}
+.feat:nth-child(3n+2),.feat:nth-child(3n){padding-left:24px}
+.feat h3{
+  font-size:14.5px;font-weight:700;color:var(--ink-0);
+  margin-bottom:8px;letter-spacing:.01em;
+}
+.feat p{font-size:13px;color:var(--ink-2);line-height:1.75}
+.feat-k{
+  font-family:var(--mono);font-size:10.5px;color:var(--ink-4);
+  margin-bottom:12px;letter-spacing:.12em;
+}
+
+/* ── 开源 ───────────────────────────────────────────────── */
+.oss{
+  display:grid;grid-template-columns:minmax(0,1fr) auto;
+  gap:clamp(20px,4vw,48px);align-items:center;
+  background:var(--paper-card);
+  border:1px solid var(--paper-edge);border-radius:14px;
+  padding:clamp(24px,4vw,36px);
+}
+.oss h3{
+  font-family:var(--serif);font-size:clamp(20px,2.6vw,25px);
+  font-weight:700;color:var(--ink-0);margin-bottom:10px;
+}
+.oss p{font-size:13.5px;color:var(--ink-2);line-height:1.8;max-width:46ch}
+.oss-meta{
+  font-family:var(--mono);font-size:11.5px;color:var(--ink-4);
+  margin-top:14px;letter-spacing:.02em;
+}
+
+/* ── 页脚 ───────────────────────────────────────────────── */
+footer{
+  border-top:1px solid var(--paper-edge);
+  padding:30px 0 40px;margin-top:clamp(40px,6vw,70px);
+  display:flex;flex-wrap:wrap;gap:14px;align-items:center;
+  font-size:12px;color:var(--ink-3);
+}
+footer .sep{color:var(--ink-4)}
+footer a{color:var(--ink-2);border-bottom:1px solid var(--paper-edge)}
+footer a:hover{border-color:var(--ink-2)}
+
+/* ── 入场：只做一次，克制 ───────────────────────────────── */
+.reveal{opacity:0;transform:translateY(14px);transition:opacity .6s var(--ease),transform .6s var(--ease)}
+.reveal.in{opacity:1;transform:none}
+
+@media (prefers-reduced-motion:reduce){
+  *{animation:none!important;transition:none!important}
+  .reveal{opacity:1;transform:none}
+}
+
+/* ── 响应式 ─────────────────────────────────────────────── */
+@media (max-width:860px){
+  .hero{grid-template-columns:1fr;gap:28px}
+  .hero-art{order:-1;justify-content:flex-start}
+  .hero-art img{width:min(88%,280px)}
+  .hero-copy{max-width:none}
+  .lede{max-width:none}
+  h1{font-size:clamp(32px,8.4vw,44px)}
+  .facts{grid-template-columns:repeat(2,1fr)}
+  .sec-head{flex-wrap:wrap}
+  .sec-head p{margin-left:0;text-align:left;width:100%}
+  .oss{grid-template-columns:1fr}
+  /* 六宫格在窄屏拆成单列，用横线分隔 */
+  .feat-grid{grid-template-columns:1fr}
+  .feat{padding:22px 0}
+  .feat:nth-child(3n+2),.feat:nth-child(3n){padding-left:0}
+}
+@media (max-width:520px){
+  .frame{width:calc(100% - 36px)}
+  .top-nav{gap:16px}
+  .top-nav .nav-opt{display:none}
+  .facts{grid-template-columns:repeat(2,1fr)}
+  .fact{padding:16px 0}
+  .fact-num{font-size:22px}
+  /* Android 三个包在窄屏改为纵向排列，避免挤成一条被截断 */
+  .dl-sub{flex-direction:column}
+  .dl-sub a{min-width:0;width:100%}
+  .shard-band{height:20px;gap:1.5px}
+  .hero-actions .btn{flex:1;justify-content:center}
+  .dl{padding:20px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- 顶栏 -->
+  <div class="frame">
+    <header class="top">
+      <a class="brand" href="./">
+        <span class="seal"><img src="assets/cat-ink.png" alt="墨取图标"></span>
+        <span>
+          <span class="brand-name">墨取</span>
+          <span class="brand-latin">INKFETCH</span>
+        </span>
+      </a>
+      <nav class="top-nav">
+        <a class="nav-opt" href="#download">下载</a>
+        <a class="nav-opt" href="#features">功能</a>
+        <a href="#source">开源</a>
+      </nav>
+    </header>
+  </div>
+
+  <!-- 主视觉 -->
+  <div class="frame">
+    <div class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">GitHub 下载工具 · <b>v2.5.1</b> · Windows / Android</p>
+        <h1>把链接变成文件
+          <span>多镜像并发，断了能接着下</span>
+        </h1>
+        <p class="lede">
+          贴一个 GitHub 链接，剩下的交给它：解析文件名与校验值、自动测速分配连接、
+          分片同时写入、完成后比对 SHA-256。装好就走，不留散落文件。
+        </p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="#download">选择版本下载</a>
+          <a class="btn btn-ghost" href="https://github.com/Roambus/inkfetch" target="_blank" rel="noopener">查看源码</a>
+        </div>
+      </div>
+      <div class="hero-art">
+        <img src="assets/cat-ink.png" alt="一只水墨画的猫，黑墨头与蓝色尾巴">
+      </div>
+    </div>
+
+    <!-- 分片带：用真实的分片配色，代表「一个文件被切成很多段同时下载」 -->
+    <div class="shard-band" id="shardBand" aria-hidden="true"></div>
+
+    <div class="facts">
+      <div class="fact"><div class="fact-num">108</div><div class="fact-label">个镜像源</div></div>
+      <div class="fact"><div class="fact-num">32</div><div class="fact-label">条并发连接</div></div>
+      <div class="fact"><div class="fact-num">SHA-256</div><div class="fact-label">官方校验值比对</div></div>
+      <div class="fact"><div class="fact-num">10.7<span style="font-size:.55em"> MB</span></div><div class="fact-label">Windows 单文件</div></div>
+    </div>
+  </div>
+
+  <!-- 下载 -->
+  <section id="download">
+    <div class="frame">
+      <div class="sec-head">
+        <h2>下载</h2>
+        <p>Windows 免安装 · Android 首次安装需允许来源</p>
+      </div>
+
+      <div class="dl-grid">
+        <!-- Windows -->
+        <div class="dl reveal">
+          <div class="dl-top">
+            <div>
+              <div class="dl-plat">Windows</div>
+              <div class="dl-meta">x64 · 单文件 EXE · 10.7 MB</div>
+            </div>
+          </div>
+          <p class="dl-desc">
+            双击即用，不需要安装，也不会在系统里留下任何散落文件。运行结束后临时目录自动清理。
+          </p>
+          <a class="dl-btn" href="/download/InkFetch-2.5.1-windows-x64.exe" download>
+            下载 EXE <span>2.5.1</span>
+          </a>
+          <button class="dl-hash" id="shaBtn" type="button"
+                  data-sha="EECC282688DA220246A5E956FF93315D2E841872A7E3157EBDBA0F575D671F3A"
+                  title="点击复制完整 SHA-256">
+            <span>SHA-256</span> EECC2826…F3A <em>复制</em>
+          </button>
+        </div>
+
+        <!-- Android -->
+        <div class="dl reveal">
+          <div class="dl-top">
+            <div>
+              <div class="dl-plat">Android</div>
+              <div class="dl-meta">APK · 按机型选择 · 15.8–19.7 MB</div>
+            </div>
+          </div>
+          <p class="dl-desc">
+            不确定选哪个？绝大多数近年手机都选 <b>arm64-v8a</b>。装不上或闪退时再试另一个。
+          </p>
+          <div class="dl-sub">
+            <a href="/download/InkFetch-2.5.1-android-arm64-v8a.apk" download>
+              arm64-v8a<small>多数手机 · 18.3 MB</small>
+            </a>
+            <a href="/download/InkFetch-2.5.1-android-armeabi-v7a.apk" download>
+              armeabi-v7a<small>较旧机型 · 15.8 MB</small>
+            </a>
+            <a href="/download/InkFetch-2.5.1-android-x86_64.apk" download>
+              x86_64<small>模拟器 · 19.7 MB</small>
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 功能 -->
+  <section id="features">
+    <div class="frame">
+      <div class="sec-head">
+        <h2>它怎么做的</h2>
+        <p>这些不是宣传词，是它在后台真的会做的事</p>
+      </div>
+      <div class="feat-grid">
+        <div class="feat reveal">
+          <div class="feat-k">多镜像</div>
+          <h3>先测速，再分配</h3>
+          <p>拿 108 个可用源逐个实测，按真实速度把连接分给快的那些。慢源自动降权，不拖累整体。</p>
+        </div>
+        <div class="feat reveal">
+          <div class="feat-k">分片</div>
+          <h3>一个文件，多路同时写</h3>
+          <p>切成很多段并行下载，写进同一个文件。空闲连接会去抢别人手里剩下的一半，结尾不拖尾。</p>
+        </div>
+        <div class="feat reveal">
+          <div class="feat-k">断点</div>
+          <h3>断了能接着下</h3>
+          <p>进度记在系统注册表里，不是散落的临时文件。关掉再开，从断的地方继续。</p>
+        </div>
+        <div class="feat reveal">
+          <div class="feat-k">校验</div>
+          <h3>对得上才算完</h3>
+          <p>下完算一遍 SHA-256，和 GitHub 官方 digest 比对。对不上会明确告诉你，而不是安静地给你一个坏文件。</p>
+        </div>
+        <div class="feat reveal">
+          <div class="feat-k">加速</div>
+          <h3>先测，再决定改不改</h3>
+          <p>实测直连与各候选线路的速度，把结果摆出来让你选。没有更快就不动你的系统设置。</p>
+        </div>
+        <div class="feat reveal">
+          <div class="feat-k">干净</div>
+          <h3>不留痕迹</h3>
+          <p>设置与记录走注册表，单文件版运行结束自动清理临时目录。exe 旁边永远只有一个 exe。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 开源 -->
+  <section id="source">
+    <div class="frame">
+      <div class="oss reveal">
+        <div>
+          <h3>源码在这</h3>
+          <p>
+            墨取是开源项目，用 Flutter 写成。Windows 侧的单文件打包、注册表存储、
+            hosts 写入，以及 Android 侧的 DNS 分流，都是这个仓库的一部分。
+          </p>
+          <div class="oss-meta">github.com/Roambus/inkfetch · Flutter · Dart · Kotlin · C++</div>
+        </div>
+        <a class="btn btn-primary" href="https://github.com/Roambus/inkfetch" target="_blank" rel="noopener">打开仓库</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- 页脚 -->
+  <div class="frame">
+    <footer>
+      <span>墨取 InkFetch</span>
+      <span class="sep">·</span>
+      <span>本地运行，不经过任何第三方服务器</span>
+      <span class="sep">·</span>
+      <a href="https://github.com/Roambus/inkfetch" target="_blank" rel="noopener">GitHub</a>
+    </footer>
+  </div>
+</div>
+
+<script>
+/* 分片带：用应用里同一套分片配色生成。
+   每一格是一个分片，颜色代表它由哪类镜像供给；
+   前段已完成（实色）、中段正在写（呼吸）、后段待下载（留白）。
+   用 JS 生成是为了让格数随宽度自适应，而不是写死。 */
+(function(){
+  var band=document.getElementById('shardBand');
+  if(!band) return;
+  var palette=['#1C5B4A','#3F6E62','#6E7F5A','#8A6A46','#5B6280','#7C5560'];
+  var w=document.documentElement.clientWidth;
+  var count=w<640?48:(w<1100?92:120);
+  // 确定性的伪随机：每次刷新图案一致，真随机会显得廉价
+  var seed=20261126;
+  function rnd(){seed=(seed*1103515245+12345)&0x7fffffff;return seed/0x7fffffff;}
+  var doneAt=Math.floor(count*0.62);
+  var liveAt=Math.floor(count*0.86);
+  var frag=document.createDocumentFragment();
+  for(var i=0;i<count;i++){
+    var el=document.createElement('i');
+    el.style.animationDelay=(i*5)+'ms';
+    if(i>=liveAt){
+      // 未开始：极淡的纸影，只有一条可见的边
+      el.style.background='#EAE7DD';
+      el.style.opacity='1';
+    }else if(i>=doneAt){
+      // 正在写：交替亮暗，做出「还在进行」的呼吸感
+      el.style.background=palette[Math.floor(rnd()*palette.length)];
+      el.style.opacity='.55';
+      el.style.animation='shardIn .7s var(--ease) backwards, breathe 2.4s ease-in-out infinite';
+      el.style.animationDelay=(i*5)+'ms, '+((i-doneAt)*90)+'ms';
+    }else{
+      // 已完成：实色，越靠前越浓
+      el.style.background=palette[Math.floor(rnd()*palette.length)];
+      el.style.opacity=(0.62+0.38*(1-i/doneAt)).toFixed(2);
+    }
+    frag.appendChild(el);
+  }
+  band.appendChild(frag);
+})();
+
+/* 入场：整个页面只做一次，不逐块堆效果 */
+(function(){
+  var items=document.querySelectorAll('.reveal');
+  if(!('IntersectionObserver' in window)){
+    items.forEach(function(el){el.classList.add('in');});
+    return;
+  }
+  var io=new IntersectionObserver(function(entries){
+    entries.forEach(function(e){
+      if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target);}
+    });
+  },{rootMargin:'0px 0px -8% 0px',threshold:.05});
+  items.forEach(function(el){io.observe(el);});
+})();
+/* 复制 SHA-256：点一下拿到完整值，用来核对下载到的文件 */
+(function(){
+  var btn=document.getElementById('shaBtn');
+  if(!btn) return;
+  var label=btn.querySelector('em');
+  btn.addEventListener('click',function(){
+    var sha=btn.getAttribute('data-sha')||'';
+    function done(){
+      label.textContent='已复制';
+      setTimeout(function(){label.textContent='复制';},1600);
+    }
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      navigator.clipboard.writeText(sha).then(done).catch(fallback);
+    }else{
+      fallback();
+    }
+    function fallback(){
+      // 老浏览器/非安全上下文下的兜底
+      var t=document.createElement('textarea');
+      t.value=sha;t.style.position='fixed';t.style.opacity='0';
+      document.body.appendChild(t);t.select();
+      try{document.execCommand('copy');done();}catch(e){}
+      document.body.removeChild(t);
+    }
+  });
+})();
+</script>
+</body>
+</html>
