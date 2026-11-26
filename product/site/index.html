@@ -90,9 +90,8 @@ h1{
 .lede{
   margin-top:20px;
   font-size:15.5px;line-height:1.9;color:var(--ink-2);
-  max-width:24em;
-  /* 中文按字断行会把「SHA-256」拆成两截，这里禁掉 */
-  word-break:keep-all;
+  /* 行宽放到 30em：太窄会把「SHA-256」挤到单独一行 */
+  max-width:30em;
 }
 .lede code{
   font-family:var(--mono);font-size:.92em;white-space:nowrap;
@@ -257,7 +256,7 @@ footer .dot{color:var(--line)}
     <div>
       <h1>贴链接，<br>下成文件。</h1>
       <p class="lede">
-        多源测速、分片并发，断了接着下。完成比对 <code>SHA-256</code>。
+        多源测速、分片并发、断点续传，完成后比对 <code>SHA-256</code>。
       </p>
       <div class="actions">
         <a class="btn btn-primary" href="#download">
