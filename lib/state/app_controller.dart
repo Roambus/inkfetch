@@ -13,6 +13,7 @@ import '../core/platform.dart';
 import '../core/probe.dart';
 import '../core/resume_store.dart';
 import '../core/storage.dart';
+import '../core/update_check.dart';
 import '../core/url_parser.dart';
 
 class AppController extends ChangeNotifier {
@@ -63,6 +64,20 @@ class AppController extends ChangeNotifier {
   int noticeSeq = 0;
   String? notice;
 
+  /// ── 版本检查状态 ────────────────────────────────────────────
+  /// 启动后延迟检查一次，不阻塞首屏。结果放在这里，弹窗由 AppShell 决定。
+  UpdateCheckResult? updateResult;
+  bool checkingUpdate = false;
+
+  /// 当前应该弹出来的更新：线上比本地新，且用户没跳过这个版本。
+  /// 只读计算，不是存储字段——跳过状态存在 settings 里。
+  UpdateCheckResult? get pendingUpdate {
+    final result = updateResult;
+    if (result == null || !result.hasUpdate) return null;
+    if (settings.skippedVersion == result.latest) return null;
+    return result;
+  }
+
   int _taskSeq = 0;
   bool _queueRunning = false;
   bool _copyCancelled = false;
@@ -111,6 +126,10 @@ class AppController extends ChangeNotifier {
     initialized = true;
     _safeNotify();
     await refreshIncompleteTasks();
+    // 首屏之后再查版本：它不影响任何本地功能，不该跟启动抢时间。
+    unawaited(Future<void>.delayed(const Duration(seconds: 2), () async {
+      if (!_disposed) await checkUpdate();
+    }));
   }
 
   void _listenNativeEvents() {
@@ -744,6 +763,57 @@ class AppController extends ChangeNotifier {
 
   int get enabledMirrorCount =>
       builtinMirrors.length - settings.disabledMirrors.length;
+
+  /// ── 版本检查 ────────────────────────────────────────────────
+
+  /// 检查线上版本。
+  ///
+  /// 不 await 在首屏路径上：网络慢的时候不能让窗口空着等一个 JSON。
+  /// 失败什么也不做——用户开的是下载器，不是来排障网络连通的。
+  Future<void> checkUpdate({bool manual = false}) async {
+    if (checkingUpdate) return;
+    checkingUpdate = true;
+    if (manual) {
+      _emitNotice('正在检查更新…');
+    }
+    _safeNotify();
+    try {
+      final result = await checkForUpdate();
+      updateResult = result;
+      if (result.ok) {
+        settings.lastUpdateCheck = DateTime.now().toIso8601String();
+        await _store.saveSettings(settings);
+        if (manual) {
+          if (result.hasUpdate) {
+            _emitNotice('发现新版本 ${result.latest}');
+          } else {
+            _emitNotice('已是最新版本 ${result.current}');
+          }
+        }
+      } else if (manual) {
+        _emitNotice('检查更新失败，请稍后再试');
+      }
+    } finally {
+      checkingUpdate = false;
+      _safeNotify();
+    }
+  }
+
+  /// 用户选择「跳过这个版本」。只跳过当前这一个，下个版本仍会提示。
+  Future<void> skipUpdateVersion() async {
+    final result = updateResult;
+    if (result == null) return;
+    settings.skippedVersion = result.latest;
+    await _store.saveSettings(settings);
+    _safeNotify();
+  }
+
+  /// 清掉跳过记录，下次启动会重新提示（设置页「恢复更新提示」用）。
+  Future<void> clearSkippedVersion() async {
+    settings.skippedVersion = null;
+    await _store.saveSettings(settings);
+    _safeNotify();
+  }
 
   Future<void> clearHistory() async {
     history.clear();

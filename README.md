@@ -1,7 +1,7 @@
 # 墨取 InkFetch
 
 <p align="center">
-  <img src="assets/icon/inkfetch_icon.png" width="140" alt="墨取 InkFetch" />
+  <img src="assets/icon/inkfetch_mark_320.png" width="140" alt="墨取 InkFetch" />
 </p>
 
 原生 Flutter 实现的 GitHub 多镜像高速下载器，支持 Android 手机 / 平板与 Windows / Linux 桌面端。中文名「墨取」，英文名 InkFetch。
@@ -25,7 +25,9 @@
 
 ## 下载
 
-在 [Releases](https://github.com/Roambus/inkfetch/releases) 获取最新版本：
+在 [Releases](https://github.com/Roambus/inkfetch/releases) 或[官网](https://www.roambus.me/inkfetch/)获取最新版本。
+
+应用启动后会自动检查官网有没有新版本，弹窗里可以直接去下载，也可以跳过这个版本。
 
 | 产物 | 说明 |
 | --- | --- |

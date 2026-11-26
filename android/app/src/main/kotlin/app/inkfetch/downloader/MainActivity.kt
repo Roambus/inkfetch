@@ -92,6 +92,10 @@ class MainActivity : FlutterActivity() {
                         val path = call.argument<String>("path")
                         result.success(openFolder(tree, path))
                     }
+                    "openUrl" -> {
+                        val url = call.argument<String>("url")
+                        result.success(openUrl(url))
+                    }
                     "accelStart" -> startAccel(call, result)
                     "accelStop" -> {
                         val intent = Intent(this, GithubAccelVpnService::class.java)
@@ -373,6 +377,25 @@ class MainActivity : FlutterActivity() {
                 ?.let { return it }
         }
         return "application/octet-stream"
+    }
+
+    /**
+     * 用系统浏览器打开一个网址（官网、Release 页面）。
+     *
+     * 不走 ACTION_SEND 之类的间接方式：直接 ACTION_VIEW 交给默认浏览器，
+     * 用户点的是「官网」，就该落在浏览器里。
+     */
+    private fun openUrl(urlString: String?): Boolean {
+        if (urlString.isNullOrEmpty()) return false
+        return try {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(urlString)).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(intent)
+            true
+        } catch (_: Throwable) {
+            false
+        }
     }
 
     private fun openFile(uriString: String?, path: String?): Boolean {

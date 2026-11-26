@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 
+import '../core/update_check.dart';
 import '../state/accel_controller.dart';
 import '../state/app_controller.dart';
 import 'downloads_hub.dart';
 import 'github_accel_page.dart';
 import 'settings_page.dart';
 import 'theme.dart';
+import 'update_dialog.dart';
 import 'widgets.dart';
 
 class AppShell extends StatefulWidget {
@@ -21,6 +23,9 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   late int _lastNoticeSeq;
   bool _folderChecked = false;
+
+  /// 已经弹过更新的那次结果。用对象本身做标记，避免同一份结果反复弹。
+  UpdateCheckResult? _shownUpdate;
 
   AppController get c => widget.controller;
 
@@ -51,6 +56,7 @@ class _AppShellState extends State<AppShell> {
         if (mounted) c.promptFolderOnFirstLaunch();
       });
     }
+    _maybeShowUpdate();
     if (c.noticeSeq == _lastNoticeSeq) return;
     _lastNoticeSeq = c.noticeSeq;
     final message = c.notice;
@@ -60,6 +66,26 @@ class _AppShellState extends State<AppShell> {
       final messenger = ScaffoldMessenger.maybeOf(context);
       messenger?.hideCurrentSnackBar();
       messenger?.showSnackBar(SnackBar(content: Text(message)));
+    });
+  }
+
+  /// 有新版本就弹一次。
+  ///
+  /// 时序上要避开首次启动的「选保存位置」提示：两个弹窗同时出现会把
+  /// 界面压住，用户不知道该先处理哪个。所以更新提示排在文件夹提示之后。
+  void _maybeShowUpdate() {
+    final update = c.pendingUpdate;
+    if (update == null) return;
+    if (identical(update, _shownUpdate)) return;
+    if (!_folderChecked) return;
+    _shownUpdate = update;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      // 等首帧与可能的文件夹提示落定，再弹更新。
+      await Future<void>.delayed(const Duration(milliseconds: 600));
+      if (!mounted) return;
+      if (c.pendingUpdate == null) return;
+      await showUpdateDialog(context, c, update);
     });
   }
 
@@ -132,7 +158,7 @@ class _SideBar extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 4),
             child: Row(
               children: [
-                const SealMark(size: 34),
+                const BrandMark(size: 34),
                 const SizedBox(width: 11),
                 Expanded(
                   child: Column(

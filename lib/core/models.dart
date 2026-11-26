@@ -590,6 +590,15 @@ class AppSettings {
   bool verifySha;
   bool autoSaveToSelectedFolder;
 
+  /// 用户选择「跳过这个版本」时记下的版本号。
+  ///
+  /// 只记一个版本：跳过了 2.6.0，等 2.7.0 发布时仍然会提示。
+  /// 不做「永远不再检查」——那样用户会一直停留在旧版本而毫不知情。
+  String? skippedVersion;
+
+  /// 上次成功检查到线上版本的时间（ISO 8601），用于设置页显示。
+  String? lastUpdateCheck;
+
   AppSettings({
     this.maxConnections = 32,
     this.theme = 'system',
@@ -600,6 +609,8 @@ class AppSettings {
     this.deepProbeAll = false,
     this.verifySha = true,
     this.autoSaveToSelectedFolder = true,
+    this.skippedVersion,
+    this.lastUpdateCheck,
   });
 
   Map<String, dynamic> toJson() => {
@@ -612,6 +623,8 @@ class AppSettings {
     'deepProbeAll': deepProbeAll,
     'verifySha': verifySha,
     'autoSaveToSelectedFolder': autoSaveToSelectedFolder,
+    'skippedVersion': skippedVersion,
+    'lastUpdateCheck': lastUpdateCheck,
   };
 
   factory AppSettings.fromJson(Map<String, dynamic> json) => AppSettings(
@@ -626,5 +639,7 @@ class AppSettings {
     deepProbeAll: json['deepProbeAll'] as bool? ?? false,
     verifySha: json['verifySha'] as bool? ?? true,
     autoSaveToSelectedFolder: json['autoSaveToSelectedFolder'] as bool? ?? true,
+    skippedVersion: json['skippedVersion'] as String?,
+    lastUpdateCheck: json['lastUpdateCheck'] as String?,
   );
 }

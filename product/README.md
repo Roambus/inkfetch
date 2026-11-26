@@ -7,9 +7,59 @@
 | 用途 | 服务器路径 |
 |---|---|
 | 页面与资源 | `/var/www/roambus/inkfetch/` |
+| 版本清单 | `/var/www/roambus/inkfetch/version.json` |
 | 安装包 | `/var/www/roambus/download/` |
 
-源码在本仓库 `product/site/`，改完用 SFTP 覆盖到服务器同名路径即可，不需要改动 nginx 配置（静态文件由已有站点直接服务）。
+源码在本仓库 `product/site/`。静态文件由已有站点直接服务，不需要改 nginx 配置。
+
+## 页面设计
+
+一屏到底，四块：标题区 / 四个数字 / 下载 / 页脚。
+
+三个约束：
+
+- **单一墨阶**。只有纸色、三档墨色、一点松绿、一点朱砂。朱砂只出现在页脚那枚印章上。
+- **标题用衬线**（Noto Serif SC 优先，回退宋体）。正文用系统无衬线，数字与哈希用 `InkMono`。这是「水墨感」的来处——没有它整页就是普通的极简落地页。
+- **不放大装饰**。猫是唯一的图形，它是应用图标本身，不是另画的插画。
+
+无外部请求：字体与图片都是同源资源，断网可用。
+
+## 应用内的版本检查
+
+应用启动约 2 秒后请求 `version.json`，拿到比当前新的版本就弹窗。用户可以选择：
+
+- **去下载** → 打开 `version.json` 里的 `url`（即本页）
+- **跳过此版本** → 记下这个版本号，只在下一个版本出现前不再提示
+- **稍后** → 什么都不记，下次启动再问
+
+取不到 `version.json` 时回退到 GitHub Release 的 tag；两个都取不到就安静退出，不打扰用户。
+
+跳过记录与上次检查时间存在 `AppSettings` 里（Windows 走注册表，Android 走 shared_preferences）。
+
+## 发布新版本
+
+不要手改版本号和哈希，容易漏。按顺序跑：
+
+```powershell
+# 1. 改 pubspec.yaml 的 version（例如 2.6.0 → 2.7.0，build 号 +1）
+# 2. 构建
+flutter build windows --release
+powershell -File scripts\build_single_exe.ps1 -SkipBuild
+flutter build apk --release --target-platform android-arm64
+# ...每个 ABI 各构建一次，复制到 dist\
+
+# 3. 生成版本清单（读 dist\ 里的实际文件，算 SHA-256）
+python tool\make_release_meta.py 2.7.0 "这一版改了什么"
+
+# 4. 把版本号/哈希/体积同步进页面
+python tool\sync_site.py
+
+# 5. 上传：index.html、version.json、assets\、dist\ 里的安装包
+```
+
+`tool/sync_site.py` 会改这几处：按钮与链接里的版本号、Windows 的 `data-sha` 与展示用短哈希、四个体积数字、三个 APK 的下载文件名。跑完可以搜一下页面里还有没有旧版本号残留。
+
+`test/brand_assets_test.dart` 会检查页面版本与 `pubspec.yaml` 是否一致，不一致就失败——所以忘了改会在这里被拦下。
 
 ## 主页入口
 
@@ -23,40 +73,12 @@
 
 改动前的备份留在服务器：`/var/www/roambus/index.html.bak-before-inkfetch-20261126-150450`。
 
-## 发布新版本时要改什么
+## 截图验证的坑
 
-`product/site/index.html` 里搜 `2.5.1`，共 5 处需要替换成新版本号：
+不要用 `msedge --headless --screenshot` 判断这一页好不好看：
 
-1. 顶部 eyebrow 里的版本文字
-2. Windows 卡片的下载链接文件名
-3. Windows 卡片的 `dl-btn` 内的版本号
-4. Windows 卡片的 `data-sha`（完整 SHA-256）
-5. 三个 Android 卡片各自的下载链接文件名与体积
+- 它抓不到 canvas 的内容（会得到空白）；
+- `--virtual-time-budget` 让 `requestAnimationFrame` 只跑两次，动画走不到终态；
+- `--window-size` 与实际布局视口可能不一致，看起来像内容被截断，其实没有。
 
-同时把新的安装包上传到 `/var/www/roambus/download/`，旧版本的包可以删掉。
-
-SHA-256 用这个命令算：
-
-```powershell
-Get-FileHash dist\InkFetch-<版本>-windows-x64.exe -Algorithm SHA256
-```
-
-## 设计说明
-
-页面的视觉是围绕产品的工作方式做的，不是通用模板：
-
-- **分片带**：主视觉下方那条彩色横条用应用里同一套分片配色生成。每一格是一个分片，前段实色表示已完成、中段呼吸表示正在写、后段纸影表示未开始。格数随视口宽度自适应。
-- **排版**：标题用宋体族（与应用界面同源），正文无衬线，数字等宽。
-- **色彩**：一套墨阶（`--ink-0` ~ `--ink-4`）+ 纸色 `--paper` + 一点松烟绿 `--pine`，不引入别的色系。
-- **无外部依赖**：不引 CDN、不引字体服务，`assets/` 里的字体与图标都是本地文件，离线也能完整打开。
-
-## 验证过什么
-
-- 页面与三个资源线上均返回 200
-- 四个下载链接均返回 200，且以 `Content-Disposition: attachment` 下发
-- 服务器实测 SHA-256 与本地产物一致
-- 横向溢出：`viewport 360 = scrollWidth 360`，无溢出、无文本被裁切
-
-> 注意：headless 浏览器用 `--window-size` 截图时，截图视口与布局视口可能不同步，
-> 会看起来像内容被截断。判断是否真的溢出，请看 `documentElement.scrollWidth`
-> 与 `clientWidth` 是否相等，不要只看截图。
+判断横向是否真的溢出，要看 `document.documentElement.scrollWidth == clientWidth`，不要凭截图。

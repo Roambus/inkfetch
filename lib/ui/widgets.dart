@@ -156,36 +156,42 @@ class SectionHeader extends StatelessWidget {
   }
 }
 
-/// 印章。品牌标记不是下载箭头，是一枚朱砂印：
-/// 方框、宋体「墨」字、右下角一点留白的不完美。
-class SealMark extends StatelessWidget {
+/// 品牌标记。
+///
+/// 用的是应用图标上那只水墨猫，不是另外画的图形：图标、窗口、侧栏、
+/// 关于页必须是同一件东西，否则用户会觉得这是两个应用。
+///
+/// 猫是墨画在纸上的，墨色本身就深。直接放在深色主题上会糊成一团，
+/// 所以这里始终垫一层纸色——不是偷懒加个底，而是让它在深色界面上
+/// 仍然读作「一张纸上的墨」，而不是一块发灰的剪影。
+class BrandMark extends StatelessWidget {
   final double size;
-  const SealMark({super.key, this.size = 34});
+  const BrandMark({super.key, this.size = 34});
 
   @override
   Widget build(BuildContext context) {
-    final palette = AppPalette.of(context);
-    final seal = palette.dark ? const Color(0xFFC4553F) : kCinnabar;
     return Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
-        color: seal,
-        borderRadius: BorderRadius.circular(size * 0.16),
+        color: const Color(0xFFF4F2EC),
+        borderRadius: BorderRadius.circular(size * 0.22),
+        boxShadow: const [
+          BoxShadow(color: Color(0x14000000), blurRadius: 1, offset: Offset(0, 1)),
+        ],
       ),
-      alignment: Alignment.center,
-      child: Text(
-        '墨',
-        style: TextStyle(
-          fontSize: size * 0.6,
-          height: 1,
-          fontWeight: FontWeight.w700,
-          color: const Color(0xFFF7F2E9),
-        ),
+      padding: EdgeInsets.all(size * 0.07),
+      child: Image.asset(
+        'assets/icon/inkfetch_mark_320.png',
+        fit: BoxFit.contain,
+        filterQuality: FilterQuality.high,
+        // 装饰性图片，读屏时不该念出来；品牌名已经在旁边以文字呈现。
+        excludeFromSemantics: true,
       ),
     );
   }
 }
+
 
 /// 状态点 + 文字。用一小块实心色块表示状态，比整块着色更克制。
 class StatusDot extends StatelessWidget {
@@ -259,6 +265,75 @@ class QuietTag extends StatelessWidget {
           fontWeight: FontWeight.w500,
           letterSpacing: 0.2,
         ),
+      ),
+    );
+  }
+}
+
+/// 提示条。用于必须让用户看见、但不能打断流程的说明。
+///
+/// 与 QuietTag 的分工：QuietTag 只是给一个词加个底；这里承载一句话，
+/// 允许带一行标题。语气克制——用细边和浅底，不用整块色板压过来。
+class CautionNote extends StatelessWidget {
+  final String text;
+  final String? title;
+  final bool severe;
+
+  const CautionNote({
+    super.key,
+    required this.text,
+    this.title,
+    this.severe = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    final color = severe ? palette.danger : palette.warning;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(11, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.22)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Icon(Icons.info_outline_rounded, size: 14, color: color),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (title != null) ...[
+                  Text(
+                    title!,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: color,
+                      height: 1.5,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                ],
+                Text(
+                  text,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    height: 1.65,
+                    color: palette.muted,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

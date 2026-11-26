@@ -118,6 +118,10 @@ class _GithubAccelPageState extends State<GithubAccelPage> {
   ) {
     final status = accel.enabled ? '已开启' : '未开启';
     final statusColor = accel.enabled ? palette.accent : palette.faint;
+    // 安卓端是实验性功能：它靠 VPN 接管 DNS，一旦系统的 VPN 层或
+    // 某个 App 的解析行为与预期不同，就可能出现「只有浏览器上不了网」
+    // 这类情况。这条提示必须出现在「开启」之前，而不是出问题之后。
+    final androidRisk = Platform.isAndroid;
     return AppCard(
       child: Padding(
         padding: EdgeInsets.all(narrow ? 18 : 24),
@@ -145,12 +149,28 @@ class _GithubAccelPageState extends State<GithubAccelPage> {
                 ),
                 const SizedBox(width: 10),
                 QuietTag(text: accel.method),
+                if (androidRisk) ...[
+                  const SizedBox(width: 6),
+                  QuietTag(text: '实验性'),
+                ],
                 const Spacer(),
                 if (accel.resolvedSourceName != null && !accel.enabled)
                   QuietTag(text: '来源 ${accel.resolvedSourceName}'),
               ],
             ),
             const SizedBox(height: 16),
+            if (androidRisk) ...[
+              CautionNote(
+                title: '这是实验性功能',
+                text: accel.enabled
+                    ? '加速期间如果某个 App（尤其是浏览器）打不开网页，先关掉加速再试。'
+                          '关闭后系统的 DNS 设置会立即恢复原样。'
+                    : '它靠系统 VPN 接管 GitHub 域名的解析。部分手机、部分浏览器的'
+                          '网络栈可能因此无法上网；如果开启后网页打不开，关闭加速即可恢复，'
+                          '不影响其他 App，也不会改动你的系统设置。',
+              ),
+              const SizedBox(height: 14),
+            ],
             if (accel.busy) ...[
               _progressBlock(palette, accel),
               const SizedBox(height: 14),

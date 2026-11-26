@@ -434,8 +434,8 @@ class _HomePageState extends State<HomePage> {
     final examples = [
       (
         '单文件',
-        'inkfetch · InkSerif-Bold.ttf',
-        'https://github.com/Roambus/inkfetch/blob/main/assets/fonts/InkSerif-Bold.ttf',
+        'inkfetch · InkMono-Regular.ttf',
+        'https://github.com/Roambus/inkfetch/blob/main/assets/fonts/InkMono-Regular.ttf',
       ),
       (
         '仓库快照',

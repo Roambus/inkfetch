@@ -159,6 +159,42 @@ class NativeBridge {
     }
   }
 
+  /// 在系统浏览器里打开一个网址。
+  ///
+  /// Android 交给原生 Intent（否则没有默认浏览器可用时会静默失败），
+  /// Windows 走 rundll32 的 ShellExecute，macOS/Linux 用 open / xdg-open。
+  static Future<bool> openUrl(String url) async {
+    if (url.isEmpty) return false;
+    if (isAndroid) {
+      try {
+        return await _channel.invokeMethod<bool>('openUrl', {'url': url}) ??
+            false;
+      } catch (_) {
+        return false;
+      }
+    }
+    if (Platform.isWindows) {
+      try {
+        // 与打开文件同一条路：ShellExecute 的 open 动词会按 http(s) 关联
+        // 交给默认浏览器，且不必解析浏览器装在哪。
+        await Process.start('rundll32.exe', [
+          'shell32.dll,ShellExec_RunDLL',
+          url,
+        ], mode: ProcessStartMode.detached);
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }
+    try {
+      final cmd = Platform.isMacOS ? 'open' : 'xdg-open';
+      await Process.start(cmd, [url], mode: ProcessStartMode.detached);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// 在资源管理器里定位文件：选中这个文件本身，而不是它的父目录。
   static Future<bool> openFolder({String? treeUri, String? path}) async {
     if (isAndroid) {

@@ -4,6 +4,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import '../core/format.dart';
 import '../core/mirrors.dart';
 import '../core/models.dart';
+import '../core/update_check.dart';
 import '../state/app_controller.dart';
 import 'theme.dart';
 import 'widgets.dart';
@@ -247,7 +248,7 @@ class SettingsPage extends StatelessWidget {
         children: [
           Row(
             children: [
-              const SealMark(size: 40),
+              const BrandMark(size: 40),
               const SizedBox(width: 13),
               Expanded(
                 child: Column(
@@ -281,6 +282,37 @@ class SettingsPage extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 16),
+          _buildUpdateRow(context, palette),
+          const SizedBox(height: 4),
+          Divider(color: palette.border, height: 20),
+          Wrap(
+            spacing: 9,
+            runSpacing: 9,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              OutlinedButton.icon(
+                onPressed: openHomepage,
+                icon: const Icon(Icons.public_rounded, size: 15),
+                label: const Text('打开官网'),
+              ),
+              OutlinedButton.icon(
+                onPressed: () => openReleasePage(),
+                icon: const Icon(Icons.code_rounded, size: 15),
+                label: const Text('GitHub 仓库'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            kHomepageUrl,
+            style: TextStyle(
+              fontFamily: kMono,
+              fontFamilyFallback: kMonoFallback,
+              fontSize: 10.5,
+              color: palette.faint,
+            ),
+          ),
+          const SizedBox(height: 16),
           Text(
             '内置 ${builtinMirrors.length} 个下载源：GitHub 官方、codeload、'
             'jsDelivr、GitMirror 以及 $proxyCount 个加速代理。'
@@ -304,6 +336,102 @@ class SettingsPage extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  /// 更新检查这一行。
+  ///
+  /// 显示三件事：现在是否最新、上次什么时候查过、一个可以手动重查的按钮。
+  /// 「官网」不是隐藏链接，就写在这里——用户想找下载页时不该去翻文档。
+  Widget _buildUpdateRow(BuildContext context, AppPalette palette) {
+    final result = c.updateResult;
+    final checkedAt = c.settings.lastUpdateCheck;
+    final skipped = c.settings.skippedVersion;
+
+    String status;
+    Color statusColor;
+    if (c.checkingUpdate) {
+      status = '正在检查…';
+      statusColor = palette.muted;
+    } else if (result == null) {
+      status = checkedAt == null ? '尚未检查' : '未检查到新版本';
+      statusColor = palette.muted;
+    } else if (!result.ok) {
+      status = '检查失败';
+      statusColor = palette.muted;
+    } else if (result.hasUpdate) {
+      status = skipped == result.latest
+          ? '有新版本 ${result.latest}，已跳过'
+          : '有新版本 ${result.latest}';
+      statusColor = palette.accent;
+    } else {
+      status = '已是最新 ${result.current}';
+      statusColor = palette.faint;
+    }
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  StatusDot(color: statusColor, label: status),
+                  if (result != null && result.ok && result.source.isNotEmpty) ...[
+                    const SizedBox(width: 8),
+                    QuietTag(text: '来源 ${result.source}'),
+                  ],
+                ],
+              ),
+              if (checkedAt != null) ...[
+                const SizedBox(height: 4),
+                Text(
+                  '上次检查 ${_formatCheckedAt(checkedAt)}',
+                  style: TextStyle(fontSize: 10.5, color: palette.faint),
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(width: 10),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            OutlinedButton(
+              onPressed: c.checkingUpdate
+                  ? null
+                  : () => c.checkUpdate(manual: true),
+              child: Text(c.checkingUpdate ? '检查中…' : '检查更新'),
+            ),
+            if (skipped != null) ...[
+              const SizedBox(height: 2),
+              TextButton(
+                onPressed: c.clearSkippedVersion,
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: const Text(
+                  '恢复更新提示',
+                  style: TextStyle(fontSize: 11),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ],
+    );
+  }
+
+  static String _formatCheckedAt(String iso) {
+    final time = DateTime.tryParse(iso);
+    if (time == null) return iso;
+    final local = time.toLocal();
+    String two(int v) => v.toString().padLeft(2, '0');
+    return '${local.year}-${two(local.month)}-${two(local.day)} '
+        '${two(local.hour)}:${two(local.minute)}';
   }
 }
 
