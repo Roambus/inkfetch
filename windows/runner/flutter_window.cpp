@@ -80,6 +80,8 @@ bool FlutterWindow::OnCreate() {
       flutter_controller_->engine()->messenger());
   hosts_channel_ = std::make_unique<HostsChannel>(
       flutter_controller_->engine()->messenger());
+  proxy_channel_ = std::make_unique<ProxyChannel>(
+      flutter_controller_->engine()->messenger());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   ApplyTitleBarTheme(GetHandle());
@@ -97,6 +99,7 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  proxy_channel_ = nullptr;
   hosts_channel_ = nullptr;
   native_store_ = nullptr;
   if (flutter_controller_) {

@@ -8,6 +8,7 @@ import '../core/hosts_file.dart';
 import '../core/ip_sources.dart';
 import '../core/relay.dart';
 import '../core/speed_bench.dart';
+import '../core/windows_proxy.dart';
 
 /// 加速方式。
 enum AccelApproach {
@@ -144,12 +145,22 @@ class AccelController extends ChangeNotifier {
   Future<void> refresh() async {
     if (!supported) return;
     try {
-      final active = await AccelPlatform.isActive();
+      // 两条路各自查状态：可能只开了其中一条。
+      final hostsActive = await AccelPlatform.isActive();
       final entries = await AccelPlatform.currentEntries();
-      enabled = active;
+      final proxyActive =
+          Platform.isWindows && await WindowsProxy.isEnabled();
+
+      enabled = hostsActive || proxyActive;
+      relayEnabled = proxyActive;
       activeEntries = entries;
-      if (active && entries.isNotEmpty && message.isEmpty) {
-        message = '已启用，${entries.length} 个域名走加速';
+
+      if (message.isEmpty) {
+        if (hostsActive && entries.isNotEmpty) {
+          message = '已启用，${entries.length} 个域名走加速';
+        } else if (proxyActive) {
+          message = '已启用中转，仅 GitHub 域名走代理';
+        }
       }
       _safeNotify();
     } catch (_) {
@@ -325,21 +336,24 @@ class AccelController extends ChangeNotifier {
     }
 
     if (choice == AccelApproach.relay) {
-      // 中转不需要改系统设置：它是本应用内部的转发开关。
-      // 这样既不影响用户其它应用的联网，也不占用服务器的
-      // 大文件带宽（服务端已限制只转发小体积请求）。
+      // 中转走「应用外」：写系统 PAC，让 Windows 按域名决定走向。
+      //
+      // 为什么用 PAC 而不是普通系统代理：用户要求「只针对 GitHub，
+      // 其它流量还是走默认网络」。普通代理会把所有站点都推给中转，
+      // 既影响其它上网、也浪费服务器带宽；PAC 能精确到域名。
       _begin('正在启用中转');
       try {
-        final ok = relayEnabled || (relay?.worthUsing ?? false);
+        final (ok, text) = await WindowsProxy.enable();
+        message = text;
         if (ok) {
           relayEnabled = true;
           enabled = true;
           activeEntries = const [];
-          message = '已启用中转线路（${relay?.summary ?? ''}），仅作用于本应用';
-        } else {
-          message = '中转不可用，未能启用';
         }
+      } catch (error) {
+        message = '启用中转失败：$error';
       } finally {
+        progress = '';
         _end();
       }
       return;
@@ -367,16 +381,27 @@ class AccelController extends ChangeNotifier {
   }
 
   /// 停用加速并恢复原状。
+  ///
+  /// 两条路各自收尾：hosts 方案移除标记区块并恢复备份，
+  /// 中转方案删掉 PAC 设置、恢复用户原本的代理配置。
+  /// 两件事都做（而不是只做一条），是因为用户可能中途切换过方式，
+  /// 只清理一条会留下残留。
   Future<void> disableAccel() async {
     if (!supported || _busy) return;
     _begin('正在关闭加速');
+    final notes = <String>[];
     try {
-      final (ok, text) = await AccelPlatform.disable();
-      message = text;
-      if (ok) {
-        enabled = false;
-        activeEntries = const [];
+      final (hostsOk, hostsText) = await AccelPlatform.disable();
+      if (hostsOk) notes.add(hostsText);
+
+      if (Platform.isWindows) {
+        final (proxyOk, proxyText) = await WindowsProxy.disable();
+        if (proxyOk) notes.add(proxyText);
       }
+      relayEnabled = false;
+      enabled = false;
+      activeEntries = const [];
+      message = notes.isEmpty ? '已关闭加速' : notes.join('；');
     } catch (error) {
       message = '关闭失败：$error';
     } finally {

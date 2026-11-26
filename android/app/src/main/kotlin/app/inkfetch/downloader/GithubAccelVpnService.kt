@@ -46,11 +46,11 @@ class GithubAccelVpnService : VpnService() {
 
         private const val CHANNEL_ID = "inkfetch_accel"
         private const val NOTIFICATION_ID = 4311
-        // tun 内部地址。IPv6 的那个只是为了让系统把 v6 的 DNS 查询
-        // 也送进来，我们并不会真的在 v6 上传数据。
+        // tun 内部地址：只用于接管 DNS，不承载任何实际流量。
         private const val VPN_ADDRESS = "10.111.222.1"
-        private const val VPN_ADDRESS_V6 = "fd00:111:222::1"
         private const val VPN_MTU = 1500
+        // 连续这么多次转发失败就自动关闭加速，避免用户彻底断网。
+        private const val MAX_CONSECUTIVE_FAILURES = 8
 
         @Volatile var isActive: Boolean = false
             private set
@@ -68,6 +68,13 @@ class GithubAccelVpnService : VpnService() {
     private var tun: ParcelFileDescriptor? = null
     private val running = AtomicBoolean(false)
     private var worker: Thread? = null
+
+    /// 连续转发失败计数。达到上限就自动关闭 VPN。
+    ///
+    /// 这是安全兜底：万一在某个 ROM 上转发不通，我们不能让用户的
+    /// 设备一直处于"DNS 全挂"的状态——那等于彻底断网。
+    /// 宁可自动关掉加速，让系统回到原本可用的网络。
+    private var consecutiveFailures = 0
 
     /** 域名 -> 要返回的 IP（来自 Dart 侧实测结果）。 */
     private val overrides = HashMap<String, String>()
@@ -122,21 +129,23 @@ class GithubAccelVpnService : VpnService() {
             setState(true, "加速已开启")
             return
         }
+        // 只声明 IPv4 地址与 DNS。
+        //
+        // 这里刻意**不加 IPv6**。上一版为了"把 v6 查询也收进来"同时
+        // 声明了 v6 地址与 v6 DNS，但我们的报文处理只认 IPv4，
+        // 收到的 v6 查询被直接丢弃 → 那些查询全部超时 →
+        // 浏览器打不开网页。这正是「开了加速就断网」的真凶。
+        //
+        // 只声明 v4 时，系统不会把 v6 的 DNS 发给我们，而是继续用
+        // 底层网络原本的 v6 DNS，v6 解析照常工作——这比"接管然后丢掉"安全得多。
         val builder = Builder()
             .setSession("墨取 GitHub 加速")
             .addAddress(VPN_ADDRESS, 32)
             .setMtu(VPN_MTU)
-            // 把自己声明为 DNS 服务器。
-            //
-            // 关键：必须同时加 IPv4 与 IPv6 的 DNS 地址。
-            // 只加 IPv4 时，系统仍可能把一部分查询发到 IPv6 的 DNS，
-            // 而那些包不会进到我们的 tun（我们只声明了 v4 地址），
-            // 结果是那些查询直接超时——表现为「开了加速后浏览器打不开网页」。
-            // 这里显式给两个地址，把所有 DNS 查询都收进来。
             .addDnsServer(VPN_ADDRESS)
-            .addDnsServer(VPN_ADDRESS_V6)
-            .addAddress(VPN_ADDRESS_V6, 128)
-            .setBlocking(false)
+            // 阻塞模式：非阻塞下读不到数据会立刻返回，循环空转烧 CPU，
+            // 设备变慢也表现为"上不了网"。
+            .setBlocking(true)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             builder.setMetered(false)
@@ -189,9 +198,20 @@ class GithubAccelVpnService : VpnService() {
             val length = try {
                 input.read(buffer)
             } catch (e: Exception) {
+                // 读失败（tun 已关闭 / 被系统回收）就退出循环。
                 break
             }
-            if (length <= 0) continue
+            if (length <= 0) {
+                // 阻塞模式下读到 0 说明通道已无可用数据，
+                // 稍等再试，避免空转把 CPU 打满。
+                if (!running.get()) break
+                try {
+                    Thread.sleep(10)
+                } catch (_: InterruptedException) {
+                    break
+                }
+                continue
+            }
             try {
                 handlePacket(buffer, length, output)
             } catch (_: Exception) {
@@ -227,7 +247,17 @@ class GithubAccelVpnService : VpnService() {
         val name = parseQueryName(query) ?: return
 
         val answer = resolveLocally(name, query) ?: forwardUpstream(query)
-        if (answer == null) return
+        if (answer == null) {
+            // 上游转发也失败：记一次失败，连续失败就自我关闭，
+            // 宁可不用加速，也不能让用户彻底断网。
+            consecutiveFailures++
+            if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+                setState(false, "DNS 转发连续失败，已自动关闭加速以免影响上网")
+                stopVpn("DNS 转发失败，已自动关闭")
+            }
+            return
+        }
+        consecutiveFailures = 0
 
         val response = buildUdpResponse(packet, headerLength, udpOffset, answer)
         try {
@@ -278,6 +308,16 @@ class GithubAccelVpnService : VpnService() {
     private fun tryForward(query: ByteArray, server: String): ByteArray? {
         return try {
             DatagramSocket().use { socket ->
+                // 关键：把我们自己的 socket 绑定到「不经过本 VPN」的底层网络。
+                //
+                // 不这么做的话，转发出去的查询会被这条 VPN 再次捕获
+                // （即使 addDisallowedApplication 排除了本应用，
+                // 某些 ROM 上仍会回环），形成自己问自己，永远没有回包。
+                // protect() 让该 socket 走真实网络，这是 VpnService 的
+                // 标准做法，也是「开加速后浏览器断网」的另一个常见原因。
+                if (!protect(socket)) {
+                    return null
+                }
                 socket.soTimeout = 2500
                 val target = InetAddress.getByName(server)
                 socket.send(

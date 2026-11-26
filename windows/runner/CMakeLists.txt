@@ -13,6 +13,7 @@ add_executable(${BINARY_NAME} WIN32
   "main.cpp"
   "native_store.cpp"
   "payload.cpp"
+  "proxy_channel.cpp"
   "utils.cpp"
   "win32_window.cpp"
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
@@ -43,6 +44,8 @@ target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
 # Windows 自带压缩库（Compression API），用于单文件版内嵌资源。
 target_link_libraries(${BINARY_NAME} PRIVATE "cabinet.lib")
+# InternetSetOption：设置系统代理后通知系统刷新。
+target_link_libraries(${BINARY_NAME} PRIVATE "wininet.lib")
 
 # 单文件版：引擎 DLL 在运行时才解到临时目录，因此改成延迟加载，
 # 由 payload.cpp 里的 DelayLoadHook 按绝对路径 LoadLibrary。

@@ -8,6 +8,7 @@
 
 #include "hosts_channel.h"
 #include "native_store.h"
+#include "proxy_channel.h"
 #include "win32_window.h"
 
 // A window that does nothing but host a Flutter view.
@@ -36,6 +37,9 @@ class FlutterWindow : public Win32Window {
 
   // hosts 写入通道（带提权副作用，单独一条通道）。
   std::unique_ptr<HostsChannel> hosts_channel_;
+
+  // Windows 系统代理（PAC）通道：只改当前用户注册表，不需要提权。
+  std::unique_ptr<ProxyChannel> proxy_channel_;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_
