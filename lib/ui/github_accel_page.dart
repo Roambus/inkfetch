@@ -73,6 +73,10 @@ class _GithubAccelPageState extends State<GithubAccelPage> {
                       const SizedBox(height: 16),
                       _relayCard(context, palette, accel, narrow),
                     ],
+                    if (accel.hasBothOptions) ...[
+                      const SizedBox(height: 16),
+                      _approachPicker(context, palette, accel),
+                    ],
                     if (accel.candidates.isNotEmpty) ...[
                       const SizedBox(height: 16),
                       _previewCard(palette, accel),
@@ -319,6 +323,134 @@ class _GithubAccelPageState extends State<GithubAccelPage> {
               size: 16,
               color: palette.faint,
             ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 加速方式选择：两条路都可用时，把选择权交给用户。
+  ///
+  /// 这一块是直接回应用户反馈「中转更快却没有选项」——
+  /// 只要两条路都有实测数据，就并排列出来让你点。
+  Widget _approachPicker(
+    BuildContext context,
+    AppPalette palette,
+    AccelController accel,
+  ) {
+    final hostMs = accel.ipOptionMs;
+    final relayMs = accel.relayOptionMs;
+    // 谁更快就推荐谁，但不强制。
+    final relayFaster = relayMs != null &&
+        (hostMs == null || relayMs < hostMs);
+
+    return AppCard(
+      child: Padding(
+        padding: const EdgeInsets.all(22),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SectionHeader(title: '选择加速方式'),
+            const SizedBox(height: 6),
+            Text(
+              '两条路都测过，你可以自己选。默认会选更快的那条。',
+              style: TextStyle(fontSize: 12, color: palette.muted, height: 1.6),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: _approachTile(
+                    palette,
+                    title: 'hosts 方案',
+                    subtitle: '改系统文件，全局生效',
+                    ms: hostMs,
+                    selected: accel.approach == AccelApproach.hosts ||
+                        (accel.approach == AccelApproach.auto && !relayFaster),
+                    recommended: !relayFaster,
+                    onTap: () =>
+                        accel.setApproach(AccelApproach.hosts),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _approachTile(
+                    palette,
+                    title: '中转线路',
+                    subtitle: '只在本应用内生效',
+                    ms: relayMs,
+                    selected: accel.approach == AccelApproach.relay ||
+                        (accel.approach == AccelApproach.auto && relayFaster),
+                    recommended: relayFaster,
+                    onTap: () => accel.setApproach(AccelApproach.relay),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _approachTile(
+    AppPalette palette, {
+    required String title,
+    required String subtitle,
+    required int? ms,
+    required bool selected,
+    required bool recommended,
+    required VoidCallback onTap,
+  }) {
+    final border = selected ? palette.accent : palette.border;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: selected ? palette.surfaceAlt : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: border, width: selected ? 1.6 : 1),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: selected ? palette.ink : palette.muted,
+                    ),
+                  ),
+                ),
+                if (recommended) const QuietTag(text: '更快'),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              subtitle,
+              style: TextStyle(fontSize: 11, color: palette.faint),
+            ),
+            const SizedBox(height: 8),
+            // 「118ms」是纯数字，用等宽；缺失时给中文，普通样式。
+            ms != null
+                ? Text(
+                    '${ms}ms',
+                    style: dataStyle(
+                      size: 15,
+                      weight: FontWeight.w600,
+                      color: selected ? palette.accent : palette.muted,
+                    ),
+                  )
+                : Text(
+                    '未测',
+                    style: TextStyle(fontSize: 12, color: palette.faint),
+                  ),
           ],
         ),
       ),

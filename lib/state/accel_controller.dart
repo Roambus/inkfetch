@@ -9,6 +9,21 @@ import '../core/ip_sources.dart';
 import '../core/relay.dart';
 import '../core/speed_bench.dart';
 
+/// 加速方式。
+enum AccelApproach {
+  /// 自动：两条路都测，选更快的那条。
+  auto,
+
+  /// 写 hosts 指向实测最佳 IP。
+  hosts,
+
+  /// 走中转服务器。
+  relay,
+
+  /// 两条路都不理想。
+  none,
+}
+
 /// GitHub 加速页面的状态。
 ///
 /// 刻意与 AppController 分开：加速功能有自己的生命周期
@@ -58,6 +73,37 @@ class AccelController extends ChangeNotifier {
 
   /// 是否启用中转。只在 relay.worthUsing 为真时才可能为 true。
   bool relayEnabled = false;
+
+  /// 用户显式选择的加速方式。
+  ///
+  /// 早期实现只做一件事：IP 有效就用 IP，IP 无效才去看中转。
+  /// 结果是「中转明明更快，但界面不给选」——因为 IP 方案一旦
+  /// 稍有提升，中转连评估都不会发生。
+  ///
+  /// 现在两条路都会评估，并默认选更快的那条；用户也可以手动切换。
+  AccelApproach approach = AccelApproach.auto;
+
+  /// 实际生效的方式（由 [approach] 与两条路的实测结果共同决定）。
+  AccelApproach get effectiveApproach {
+    final ipOk = bestIp?.worthApplying ?? false;
+    final relayOk = relay?.worthUsing ?? false;
+    switch (approach) {
+      case AccelApproach.hosts:
+        return AccelApproach.hosts;
+      case AccelApproach.relay:
+        return relayOk ? AccelApproach.relay : AccelApproach.none;
+      case AccelApproach.none:
+        return AccelApproach.none;
+      case AccelApproach.auto:
+        if (!ipOk && !relayOk) return AccelApproach.none;
+        if (!ipOk) return AccelApproach.relay;
+        if (!relayOk) return AccelApproach.hosts;
+        // 两条都可用：比谁更快。
+        final ipMs = bestIp?.best?.totalMs ?? 1 << 30;
+        final relayMs = relay?.toRelay.totalMs ?? 1 << 30;
+        return relayMs < ipMs ? AccelApproach.relay : AccelApproach.hosts;
+    }
+  }
 
   /// 上次解析的耗时统计。
   int lastFetchMs = 0;
@@ -205,19 +251,12 @@ class AccelController extends ChangeNotifier {
       },
     );
 
-    // 如果 IP 方案没跑出结果（都不快，或波动太大），再评估一次中转。
-    // 顺序很重要：中转会占用用户自己的服务器，是最后手段，
-    // 不是首选。
-    final needRelay = bestIp == null || !bestIp!.worthApplying;
-    if (needRelay) {
-      progress = '正在评估中转线路…';
-      _safeNotify();
-      relay = await assessRelay();
-      relayEnabled = relay?.worthUsing ?? false;
-    } else {
-      relay = null;
-      relayEnabled = false;
-    }
+    // 两条路都评估，不再「IP 有效就跳过中转」。
+    // 用户明确反馈过：中转明明更快，界面却不给选。
+    progress = '正在评估中转线路…';
+    _safeNotify();
+    relay = await assessRelay();
+    relayEnabled = relay?.worthUsing ?? false;
 
     // 让 comparison 反映「择优后」的真实提升，而不是无脑用列表 IP。
     final top = bestIp!.best;
@@ -230,23 +269,23 @@ class AccelController extends ChangeNotifier {
         ip: top.ip,
         improvementPercent: bestIp!.improvementPercent,
       );
-      if (bestIp!.worthApplying) {
-        message = bestIp!.isReliable()
-            ? '最佳 IP 来自${top.origin}，比直连快 '
-                  '${bestIp!.improvementPercent?.toStringAsFixed(0) ?? '—'}%，可以启用'
-            : '最佳 IP 来自${top.origin}，但${bestIp!.reliabilityNote}';
-      } else if (relayEnabled) {
-        message = 'IP 直连没有优势，改用中转线路（${relay!.summary}）';
-      } else {
-        message = '已试 ${candidates.length} 个候选，没有明显更快的'
-            '${relay != null && !relayEnabled ? '；${relay!.summary}' : ''}';
-      }
-    } else if (top == null) {
-      message = relayEnabled
-          ? '没有可用 IP，但中转可用（${relay!.summary}）'
-          : '所有候选 IP 都不可用，无法加速';
-    } else if (base == null) {
-      message = '已选出最佳 IP（${top.origin}），但直连基准未测';
+    }
+
+    // 结论按「实际会采用哪条」来说，而不是只看 IP。
+    final effective = effectiveApproach;
+    if (effective == AccelApproach.none) {
+      message = '两条路都没有明显提升，不建议改动任何设置';
+    } else if (effective == AccelApproach.relay) {
+      final relayMs = relay?.toRelay.totalMs;
+      message = '选择中转线路（${relay?.summary ?? ''}）'
+          '${relayMs != null ? '，$relayMs ms' : ''}';
+    } else {
+      final improve = bestIp!.improvementPercent;
+      message = bestIp!.isReliable()
+          ? '选择 hosts 方案：${top?.origin} 的 ${top?.ip}，比直连快 '
+                '${improve?.toStringAsFixed(0) ?? '—'}%'
+          : 'hosts 方案略快（${improve?.toStringAsFixed(0) ?? '—'}%），'
+                '但${bestIp!.reliabilityNote}';
     }
     _safeNotify();
   }
@@ -272,27 +311,41 @@ class AccelController extends ChangeNotifier {
   /// 如果只是快一点点甚至更慢，就不该动用户的系统。
   Future<void> enableAccel() async {
     if (!supported || _busy) return;
-    if (candidates.isEmpty || comparison == null) {
+    // 两条路都要评估过才能选：用户可能是先手动点了「中转」。
+    if (candidates.isEmpty || relay == null) {
       await resolve();
-      if (candidates.isEmpty) return;
+      if (candidates.isEmpty && relay == null) return;
     }
 
-    // 已经测过速：没提升就直接拒绝，不去申请提权。
-    final measured = bestIp;
-    if (measured != null && !measured.worthApplying) {
-      final top = measured.best;
-      message = top == null
-          ? '没有可用的 IP，未做任何改动'
-          : '试了 ${measured.all.length} 个候选，没有明显更快的，未做任何改动';
-      _safeNotify();
-      return;
-    }
-    if (measured == null && comparison != null && !comparison!.worthEnabling) {
-      message = '没有明显提升，未做任何改动。${comparison!.verdict}';
+    final choice = effectiveApproach;
+    if (choice == AccelApproach.none) {
+      message = '两条路都没有明显提升，未做任何改动';
       _safeNotify();
       return;
     }
 
+    if (choice == AccelApproach.relay) {
+      // 中转不需要改系统设置：它是本应用内部的转发开关。
+      // 这样既不影响用户其它应用的联网，也不占用服务器的
+      // 大文件带宽（服务端已限制只转发小体积请求）。
+      _begin('正在启用中转');
+      try {
+        final ok = relayEnabled || (relay?.worthUsing ?? false);
+        if (ok) {
+          relayEnabled = true;
+          enabled = true;
+          activeEntries = const [];
+          message = '已启用中转线路（${relay?.summary ?? ''}），仅作用于本应用';
+        } else {
+          message = '中转不可用，未能启用';
+        }
+      } finally {
+        _end();
+      }
+      return;
+    }
+
+    // hosts 方案：需要提权写系统文件。
     _begin('正在启用加速');
     try {
       progress = Platform.isWindows
@@ -329,6 +382,27 @@ class AccelController extends ChangeNotifier {
     } finally {
       _end();
     }
+  }
+
+  /// 两条路是否都可用（决定要不要给用户选择）。
+  ///
+  /// 用户反馈过：中转明明更快，界面却只给 hosts，没得选。
+  /// 只要两条路都有实测数据，就把选择权交出来。
+  bool get hasBothOptions {
+    final ipOk = bestIp?.best != null;
+    final relayOk = relay?.relayReachable ?? false;
+    return ipOk && relayOk;
+  }
+
+  /// 把某条路的实测耗时拿出来，供界面比较展示。
+  int? get ipOptionMs => bestIp?.best?.totalMs;
+  int? get relayOptionMs => relay?.toRelay.totalMs;
+
+  /// 切换加速方式（用户手动选择）。
+  void setApproach(AccelApproach value) {
+    if (approach == value) return;
+    approach = value;
+    _safeNotify();
   }
 
   /// 清空页面上的一次性结果（换源或重测时调用）。
