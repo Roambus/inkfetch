@@ -12,10 +12,11 @@ import 'github_accel.dart';
 // 而系统 DNS 解析到 20.205.243.x（Azure 中国节点）反而更快——
 // 于是「开了加速比直连慢 50%」。
 //
-// 所以现在收集三个来源，**全部参与实测**，谁快用谁：
+// 所以现在收集多个来源，**全部参与实测**，谁快用谁：
 //   1. 公共 DNS 的解析结果（系统 DNS、DoH 服务）——反映当前网络实际可达的节点
 //   2. GitHub 官方 Meta 接口（api.github.com/meta）——官方公布的可用 IP 段
 //   3. 第三方 hosts 列表——覆盖面广，但只作为候选之一，不再盲信
+//   4. 用户的阿里云中转（只在前面都不理想时才考虑，见 relay.dart）
 
 /// 一个候选 IP 及其出处。
 class CandidateIp {
@@ -38,19 +39,13 @@ class CandidateIp {
 }
 
 /// 公共 DNS 服务：用 DoH（DNS over HTTPS）查询，避免明文 DNS 被污染。
+///
+/// 覆盖国内与国外几家，因为不同运营商对不同 DoH 的连通性差别很大。
 const List<({String name, String url})> kPublicDohServices = [
-  (
-    name: '阿里 DoH',
-    url: 'https://223.5.5.5/resolve',
-  ),
-  (
-    name: '腾讯 DoH',
-    url: 'https://doh.pub/dns-query',
-  ),
-  (
-    name: 'DNSPod DoH',
-    url: 'https://1.12.12.12/resolve',
-  ),
+  (name: '阿里 DoH', url: 'https://223.5.5.5/resolve'),
+  (name: '腾讯 DoH', url: 'https://doh.pub/dns-query'),
+  (name: 'DNSPod DoH', url: 'https://1.12.12.12/resolve'),
+  (name: 'Cloudflare DoH', url: 'https://cloudflare-dns.com/dns-query'),
 ];
 
 /// 用系统 DNS 解析域名，拿到当前网络实际会连的 IP。

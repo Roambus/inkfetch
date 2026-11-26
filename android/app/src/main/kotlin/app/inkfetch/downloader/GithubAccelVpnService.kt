@@ -46,7 +46,10 @@ class GithubAccelVpnService : VpnService() {
 
         private const val CHANNEL_ID = "inkfetch_accel"
         private const val NOTIFICATION_ID = 4311
+        // tun 内部地址。IPv6 的那个只是为了让系统把 v6 的 DNS 查询
+        // 也送进来，我们并不会真的在 v6 上传数据。
         private const val VPN_ADDRESS = "10.111.222.1"
+        private const val VPN_ADDRESS_V6 = "fd00:111:222::1"
         private const val VPN_MTU = 1500
 
         @Volatile var isActive: Boolean = false
@@ -71,6 +74,23 @@ class GithubAccelVpnService : VpnService() {
 
     /** 上游 DNS，用于转发不属于 GitHub 的查询。 */
     private var upstream: String = "223.5.5.5"
+
+    /**
+     * 上游 DNS 列表：按顺序尝试，前一个失败就用下一个。
+     *
+     * 单个上游是「浏览器上不了网」的隐患——运营商 DNS 偶尔会超时、
+     * 或被地区限制，一旦它挂了，所有非 GitHub 域名就都解析不出来。
+     * 这里准备多家公共 DNS 兜底。
+     */
+    private val upstreams: List<String>
+        get() {
+            val list = mutableListOf<String>()
+            if (upstream.isNotBlank()) list.add(upstream)
+            for (candidate in listOf("223.5.5.5", "119.29.29.29", "1.1.1.1", "8.8.8.8")) {
+                if (candidate != upstream) list.add(candidate)
+            }
+            return list
+        }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -106,16 +126,24 @@ class GithubAccelVpnService : VpnService() {
             .setSession("墨取 GitHub 加速")
             .addAddress(VPN_ADDRESS, 32)
             .setMtu(VPN_MTU)
-            // 只接管 DNS：把自己声明为 DNS 服务器，且不添加任何路由，
-            // 因此只有发往我们的 DNS 查询会被送进来，其它流量完全不受影响。
+            // 把自己声明为 DNS 服务器。
+            //
+            // 关键：必须同时加 IPv4 与 IPv6 的 DNS 地址。
+            // 只加 IPv4 时，系统仍可能把一部分查询发到 IPv6 的 DNS，
+            // 而那些包不会进到我们的 tun（我们只声明了 v4 地址），
+            // 结果是那些查询直接超时——表现为「开了加速后浏览器打不开网页」。
+            // 这里显式给两个地址，把所有 DNS 查询都收进来。
             .addDnsServer(VPN_ADDRESS)
+            .addDnsServer(VPN_ADDRESS_V6)
+            .addAddress(VPN_ADDRESS_V6, 128)
             .setBlocking(false)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             builder.setMetered(false)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
-            // 本应用自己不走这条 VPN，避免 DNS 回环。
+            // 本应用自己不走这条 VPN：转发查询要用本机网络，
+            // 若被自己的 tun 接管会形成回环。
             try {
                 builder.addDisallowedApplication(packageName)
             } catch (_: Exception) {
@@ -173,9 +201,13 @@ class GithubAccelVpnService : VpnService() {
     }
 
     private fun handlePacket(packet: ByteArray, length: Int, output: java.io.OutputStream) {
-        // IPv4 头：版本 + 头长（低 4 位 * 4）。
         if (length < 20) return
         val version = (packet[0].toInt() shr 4) and 0x0F
+        // IPv6 包：我们不处理，但必须在 DNS 层给出可用的回应路径。
+        // 系统有时会把 DNS 查询发到 v6 地址；把它们静默丢弃会让
+        // 那些查询超时（表现为网页打不开）。这里不做 v6 转发，
+        // 而是靠上面同时声明 v4/v6 DNS 地址、由 v4 响应兜住。
+        if (version == 6) return
         if (version != 4) return
         val headerLength = (packet[0].toInt() and 0x0F) * 4
         if (headerLength < 20 || length < headerLength + 8) return
@@ -226,14 +258,31 @@ class GithubAccelVpnService : VpnService() {
         return null
     }
 
-    /** 非 GitHub 域名：原样转发给上游 DNS。 */
+    /**
+     * 非 GitHub 域名：原样转发给上游 DNS。
+     *
+     * 这是「开了加速之后浏览器上不了网」最容易出问题的地方：
+     * 一旦这里返回 null，系统就拿不到任何解析结果，浏览器表现为
+     * 「无法访问此网站」。所以这里必须做到尽量不失败：
+     *   - 准备多个上游，失败就换下一个；
+     *   - 每次转发都设超时，否则 DNS 卡住会拖死整个上网体验。
+     */
     private fun forwardUpstream(query: ByteArray): ByteArray? {
+        for (server in upstreams) {
+            val answer = tryForward(query, server)
+            if (answer != null) return answer
+        }
+        return null
+    }
+
+    private fun tryForward(query: ByteArray, server: String): ByteArray? {
         return try {
             DatagramSocket().use { socket ->
-                socket.soTimeout = 3000
-                val target = InetAddress.getByName(upstream)
-                socket.send(DatagramPacket(query, query.size,
-                    InetSocketAddress(target, 53)))
+                socket.soTimeout = 2500
+                val target = InetAddress.getByName(server)
+                socket.send(
+                    DatagramPacket(query, query.size, InetSocketAddress(target, 53))
+                )
                 val buffer = ByteArray(4096)
                 val response = DatagramPacket(buffer, buffer.size)
                 socket.receive(response)

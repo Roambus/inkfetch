@@ -6,6 +6,7 @@ import '../core/accel_platform.dart';
 import '../core/github_accel.dart';
 import '../core/hosts_file.dart';
 import '../core/ip_sources.dart';
+import '../core/relay.dart';
 import '../core/speed_bench.dart';
 
 /// GitHub 加速页面的状态。
@@ -51,6 +52,12 @@ class AccelController extends ChangeNotifier {
 
   /// 候选 IP 的出处统计，界面上说明「试了几个来源」。
   int candidateCount = 0;
+
+  /// 中转评估结果（是否值得走自己的阿里云中转）。
+  RelayAssessment? relay;
+
+  /// 是否启用中转。只在 relay.worthUsing 为真时才可能为 true。
+  bool relayEnabled = false;
 
   /// 上次解析的耗时统计。
   int lastFetchMs = 0;
@@ -198,6 +205,20 @@ class AccelController extends ChangeNotifier {
       },
     );
 
+    // 如果 IP 方案没跑出结果（都不快，或波动太大），再评估一次中转。
+    // 顺序很重要：中转会占用用户自己的服务器，是最后手段，
+    // 不是首选。
+    final needRelay = bestIp == null || !bestIp!.worthApplying;
+    if (needRelay) {
+      progress = '正在评估中转线路…';
+      _safeNotify();
+      relay = await assessRelay();
+      relayEnabled = relay?.worthUsing ?? false;
+    } else {
+      relay = null;
+      relayEnabled = false;
+    }
+
     // 让 comparison 反映「择优后」的真实提升，而不是无脑用列表 IP。
     final top = bestIp!.best;
     final base = bestIp!.baseline;
@@ -209,12 +230,21 @@ class AccelController extends ChangeNotifier {
         ip: top.ip,
         improvementPercent: bestIp!.improvementPercent,
       );
-      message = bestIp!.worthApplying
-          ? '最佳 IP 来自${top.origin}，比直连快 '
-                '${bestIp!.improvementPercent?.toStringAsFixed(0) ?? '—'}%，可以启用'
-          : '已试 ${candidates.length} 个候选，没有明显更快的，不启用';
+      if (bestIp!.worthApplying) {
+        message = bestIp!.isReliable()
+            ? '最佳 IP 来自${top.origin}，比直连快 '
+                  '${bestIp!.improvementPercent?.toStringAsFixed(0) ?? '—'}%，可以启用'
+            : '最佳 IP 来自${top.origin}，但${bestIp!.reliabilityNote}';
+      } else if (relayEnabled) {
+        message = 'IP 直连没有优势，改用中转线路（${relay!.summary}）';
+      } else {
+        message = '已试 ${candidates.length} 个候选，没有明显更快的'
+            '${relay != null && !relayEnabled ? '；${relay!.summary}' : ''}';
+      }
     } else if (top == null) {
-      message = '所有候选 IP 都不可用，无法加速';
+      message = relayEnabled
+          ? '没有可用 IP，但中转可用（${relay!.summary}）'
+          : '所有候选 IP 都不可用，无法加速';
     } else if (base == null) {
       message = '已选出最佳 IP（${top.origin}），但直连基准未测';
     }

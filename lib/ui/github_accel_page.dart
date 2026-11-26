@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../core/github_accel.dart';
+import '../core/relay.dart';
 import '../core/speed_bench.dart';
 import '../state/accel_controller.dart';
 import 'theme.dart';
@@ -67,6 +68,10 @@ class _GithubAccelPageState extends State<GithubAccelPage> {
                     ] else if (accel.comparison != null) ...[
                       const SizedBox(height: 16),
                       _speedCard(context, palette, accel, narrow),
+                    ],
+                    if (accel.relay != null) ...[
+                      const SizedBox(height: 16),
+                      _relayCard(context, palette, accel, narrow),
                     ],
                     if (accel.candidates.isNotEmpty) ...[
                       const SizedBox(height: 16),
@@ -316,6 +321,142 @@ class _GithubAccelPageState extends State<GithubAccelPage> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// 中转线路的评估结果。
+  ///
+  /// 中转是「最后手段」：它占用用户自己的服务器，所以只有 IP 方案
+  /// 不理想时才会出现这块内容，而且必须实测证明它确实更快。
+  Widget _relayCard(
+    BuildContext context,
+    AppPalette palette,
+    AccelController accel,
+    bool narrow,
+  ) {
+    final relay = accel.relay!;
+    final worth = relay.worthUsing;
+    final accent = worth ? palette.accent : palette.faint;
+
+    return AppCard(
+      child: Padding(
+        padding: EdgeInsets.all(narrow ? 18 : 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SectionHeader(
+              title: '中转线路',
+              trailing: Text(
+                '你自己的服务器',
+                style: TextStyle(fontSize: 11, color: palette.faint),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+              decoration: BoxDecoration(
+                color: palette.surfaceAlt,
+                borderRadius: BorderRadius.circular(8),
+                border: Border(
+                  left: BorderSide(color: accent, width: 2.5),
+                ),
+              ),
+              child: Text(
+                relay.summary,
+                style: TextStyle(
+                  fontSize: 13,
+                  height: 1.5,
+                  fontWeight: FontWeight.w600,
+                  color: worth ? palette.ink : palette.muted,
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            if (narrow)
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _relayRow(palette, '经中转', relay.toRelay, worth),
+                  const SizedBox(height: 8),
+                  _relayRow(palette, '直连', relay.toGithubDirect, false),
+                ],
+              )
+            else
+              Row(
+                children: [
+                  Expanded(
+                    child: _relayRow(palette, '经中转', relay.toRelay, worth),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _relayRow(
+                      palette,
+                      '直连 GitHub',
+                      relay.toGithubDirect,
+                      false,
+                    ),
+                  ),
+                ],
+              ),
+            const SizedBox(height: 12),
+            Text(
+              relay.worthUsing
+                  ? '只中转 API 与小文本等「访问类」请求，不代理 Release 资产与仓库归档的下载，'
+                        '避免占用你服务器的带宽。'
+                  : '中转没有优势或不可达，不会使用它。',
+              style: TextStyle(fontSize: 11.5, color: palette.faint, height: 1.6),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _relayRow(
+    AppPalette palette,
+    String label,
+    RoundTrip trip,
+    bool highlight,
+  ) {
+    final ok = trip.ok;
+    final color = !ok
+        ? palette.danger
+        : highlight
+        ? palette.accent
+        : palette.muted;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
+      decoration: BoxDecoration(
+        color: palette.surfaceAlt,
+        borderRadius: BorderRadius.circular(9),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: TextStyle(fontSize: 11, color: palette.faint)),
+          const SizedBox(height: 5),
+          // 「不可达」是中文，等宽字体没有中文字形会变方块；
+          // 只有「123ms」这种纯数字才走等宽。
+          ok
+              ? Text(
+                  '${trip.totalMs}ms',
+                  style: dataStyle(
+                    size: 16,
+                    weight: FontWeight.w600,
+                    color: color,
+                  ),
+                )
+              : Text(
+                  '不可达',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: color,
+                  ),
+                ),
+        ],
       ),
     );
   }
